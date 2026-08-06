@@ -1,0 +1,230 @@
+import 'package:flutter/material.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+import '../../core/utils/app_logger.dart';
+
+/// 文件菜单弹出时的底部边界 anchor。当文件管理器底部存在面包屑导航时，
+/// 应将该 GlobalKey 挂在面包屑外层 Widget 上；菜单向上翻转时会以面包屑顶端
+/// 为基点对齐底边，避免菜单遮挡面包屑或在相邻行间跳动。
+final GlobalKey fileMenuBottomBoundaryKey = GlobalKey(debugLabel: 'fileMenuBottomBoundary');
+
+/// 文件菜单选项
+enum FileMenuAction {
+  select,
+  download,
+  openInBrowser,
+  openInCloudreveApp,
+  rename,
+  move,
+  copy,
+  share,
+  info,
+  delete,
+  restore,
+}
+
+/// 显示文件菜单。
+///
+/// 使用 showGeneralDialog 渲染圆角 Material 菜单，淡入滑入动画。
+/// 关闭方式：点击菜单项触发对应 action / 点击外部 / ESC。
+Future<FileMenuAction?> showFileMenu({
+  required BuildContext context,
+  required bool hasSelect,
+  required bool hasDownload,
+  required bool hasOpenInBrowser,
+  bool hasOpenInCloudreveApp = false,
+  required bool hasRename,
+  required bool hasMove,
+  required bool hasCopy,
+  required bool hasShare,
+  required bool hasDelete,
+  required bool hasRestore,
+  bool hasInfo = false,
+}) async {
+  final renderBox = context.findRenderObject() as RenderBox?;
+  if (renderBox == null) {
+    AppLogger.d('showFileMenu: renderBox is null');
+    return null;
+  }
+
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+  if (overlay == null) {
+    AppLogger.d('showFileMenu: overlay is null');
+    return null;
+  }
+
+  final offset = renderBox.localToGlobal(Offset.zero, ancestor: overlay);
+  final size = renderBox.size;
+  final centerX = offset.dx + size.width / 2;
+  final anchorTop = offset.dy + size.height / 2;
+
+  AppLogger.d('showFileMenu: widget offset: $offset, size: $size, center: $centerX');
+
+  final items = <_FileMenuItem>[
+    if (hasSelect)
+      _FileMenuItem(FileMenuAction.select, Icons.check_circle_outline, '选择'),
+    if (hasDownload)
+      _FileMenuItem(FileMenuAction.download, Icons.download, '下载'),
+    if (hasOpenInBrowser)
+      _FileMenuItem(FileMenuAction.openInBrowser, Icons.open_in_browser, '在浏览器中打开'),
+    if (hasOpenInCloudreveApp)
+      _FileMenuItem(FileMenuAction.openInCloudreveApp, Icons.web_asset, '在 Cloudreve 中打开'),
+    if (hasRename)
+      _FileMenuItem(FileMenuAction.rename, Icons.edit, '重命名'),
+    if (hasMove)
+      _FileMenuItem(FileMenuAction.move, Icons.drive_file_move, '移动'),
+    if (hasCopy)
+      _FileMenuItem(FileMenuAction.copy, Icons.copy, '复制'),
+    if (hasShare)
+      _FileMenuItem(FileMenuAction.share, Icons.share, '分享'),
+    if (hasInfo)
+      _FileMenuItem(FileMenuAction.info, LucideIcons.info, '详情'),
+    if (hasDelete)
+      _FileMenuItem(FileMenuAction.delete, Icons.delete, '删除', isDanger: true),
+    if (hasRestore)
+      _FileMenuItem(FileMenuAction.restore, Icons.restore, '恢复'),
+  ];
+
+  if (items.isEmpty) return null;
+
+  // 单 item 40 高 + 上下 padding 各 6
+  final menuHeight = items.length * 40.0 + 12.0;
+
+  // 计算菜单的底部边界：默认是视口底端；若文件管理器底部挂了面包屑，
+  // 则以面包屑顶端为底界（fileMenuBottomBoundaryKey）。
+  double resolveBottomBoundary(Size screen) {
+    final keyContext = fileMenuBottomBoundaryKey.currentContext;
+    if (keyContext == null) return screen.height;
+    final box = keyContext.findRenderObject();
+    if (box is! RenderBox || !box.attached) return screen.height;
+    final boundaryTop = box.localToGlobal(Offset.zero, ancestor: overlay).dy;
+    if (boundaryTop <= 0 || boundaryTop > screen.height) return screen.height;
+    return boundaryTop;
+  }
+
+  final result = await showGeneralDialog<FileMenuAction>(
+    context: context,
+    barrierDismissible: true,
+    barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+    barrierColor: Colors.transparent,
+    transitionDuration: const Duration(milliseconds: 120),
+    pageBuilder: (dialogContext, animation, secondaryAnimation) {
+      final screenSize = MediaQuery.sizeOf(dialogContext);
+      const menuWidth = 240.0;
+      const edgePadding = 8.0;
+      final left = (centerX - menuWidth / 2)
+          .clamp(edgePadding, screenSize.width - menuWidth - edgePadding);
+
+      // 默认向下展开；若下方空间不够则以底边界（面包屑顶端 / 视口底端）为基准向上展开，
+      // 这样相邻行右键时菜单位置稳定，不会随锚点跳动。
+      final bottomBoundary = resolveBottomBoundary(screenSize);
+      final spaceBelow = bottomBoundary - anchorTop - edgePadding;
+      final spaceAbove = anchorTop - edgePadding;
+      final flipUp = spaceBelow < menuHeight && spaceAbove > spaceBelow;
+      final double top;
+      final double maxHeight;
+      if (flipUp) {
+        const bottomGap = 4.0;
+        final fit = menuHeight.clamp(80.0, bottomBoundary - bottomGap - edgePadding);
+        top = bottomBoundary - bottomGap - fit;
+        maxHeight = fit;
+      } else {
+        top = anchorTop.clamp(edgePadding, bottomBoundary - edgePadding);
+        maxHeight = (bottomBoundary - top - edgePadding)
+            .clamp(80.0, bottomBoundary - edgePadding * 2);
+      }
+      final slideBegin = flipUp ? const Offset(0, 0.04) : const Offset(0, -0.04);
+
+      return Stack(
+        children: [
+          Positioned(
+            left: left,
+            top: top,
+            width: menuWidth,
+            child: FadeTransition(
+              opacity: CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
+              child: SlideTransition(
+                position: Tween<Offset>(begin: slideBegin, end: Offset.zero)
+                    .animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic)),
+                child: Material(
+                  color: Theme.of(dialogContext).colorScheme.surface,
+                  elevation: 8,
+                  shadowColor: Colors.black.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(12),
+                  clipBehavior: Clip.antiAlias,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxHeight),
+                    child: SingleChildScrollView(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final item in items)
+                              _FileMenuTile(
+                                item: item,
+                                onTap: () => Navigator.of(dialogContext).pop(item.action),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      );
+    },
+  );
+
+  AppLogger.d('showFileMenu: selected value: $result');
+  return result;
+}
+
+class _FileMenuItem {
+  final FileMenuAction action;
+  final IconData icon;
+  final String label;
+  final bool isDanger;
+
+  const _FileMenuItem(this.action, this.icon, this.label, {this.isDanger = false});
+}
+
+class _FileMenuTile extends StatelessWidget {
+  final _FileMenuItem item;
+  final VoidCallback onTap;
+
+  const _FileMenuTile({required this.item, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = item.isDanger ? colorScheme.error : colorScheme.onSurface;
+
+    return InkWell(
+      onTap: onTap,
+      child: SizedBox(
+        height: 40,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              Icon(item.icon, size: 20, color: color),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  item.label,
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

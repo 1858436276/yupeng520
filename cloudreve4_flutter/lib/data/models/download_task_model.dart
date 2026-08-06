@@ -1,0 +1,215 @@
+import 'package:drift/drift.dart';
+
+import '../../services/task_database.dart';
+
+/// 下载状态
+enum DownloadStatus {
+  waiting, // 等待中
+  downloading, // 下载中
+  completed, // 已完成
+  paused, // 已暂停
+  failed, // 失败
+  cancelled, // 已取消
+  archiving, // 服务端打包中
+}
+
+/// 下载任务模型
+class DownloadTaskModel {
+  final String id;
+  final String fileName;
+  final String fileUri; // cloudreve URI
+  final String? downloadUrl; // 实际下载URL
+  int fileSize;
+  final String savePath;
+  String? backgroundTaskId; // background_downloader 的 task ID（可变，用于重启后恢复映射）
+  DownloadStatus status;
+  int downloadedBytes;
+  int speed; // 下载速度，字节/秒
+  bool waitingForWifi; // 是否在等待WiFi（非持久化）
+  final DateTime createdAt;
+  DateTime? completedAt;
+  String? errorMessage;
+
+  double get progress => fileSize > 0 ? downloadedBytes / fileSize : 0.0;
+  int get remainingBytes => (fileSize - downloadedBytes).clamp(0, fileSize);
+  String get speedText {
+    final value = speed < 0 ? 0 : speed;
+    if (value < 1024) return '$value B/s';
+    if (value < 1024 * 1024) return '${(value / 1024).toStringAsFixed(1)} KB/s';
+    return '${(value / (1024 * 1024)).toStringAsFixed(1)} MB/s';
+  }
+
+  String get progressText {
+    if (status == DownloadStatus.completed && fileSize > 0) {
+      return '100%';
+    }
+    if (fileSize <= 0) {
+      return downloadedBytes > 0
+          ? '${DownloadTaskModel.readableFileSize(downloadedBytes)} / 未知'
+          : '未知大小';
+    }
+    final percent = (progress * 100).clamp(0.0, 100.0).toStringAsFixed(1);
+    return '$percent%';
+  }
+
+  static String readableFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  String get statusText {
+    switch (status) {
+      case DownloadStatus.waiting:
+        return waitingForWifi ? '等待WiFi' : '等待中';
+      case DownloadStatus.archiving:
+        return '服务端打包中';
+      case DownloadStatus.downloading:
+        return '下载中';
+      case DownloadStatus.completed:
+        return '已完成';
+      case DownloadStatus.paused:
+        return '已暂停';
+      case DownloadStatus.failed:
+        return '下载失败';
+      case DownloadStatus.cancelled:
+        return '已取消';
+    }
+  }
+
+  DownloadTaskModel({
+    required this.id,
+    required this.fileName,
+    required this.fileUri,
+    this.downloadUrl,
+    required this.fileSize,
+    required this.savePath,
+    this.backgroundTaskId,
+    this.status = DownloadStatus.waiting,
+    this.downloadedBytes = 0,
+    this.speed = 0,
+    this.waitingForWifi = false,
+    DateTime? createdAt,
+    this.completedAt,
+    this.errorMessage,
+  }) : createdAt = createdAt ?? DateTime.now();
+
+  DownloadTaskModel copyWith({
+    String? id,
+    String? fileName,
+    String? fileUri,
+    String? downloadUrl,
+    int? fileSize,
+    String? savePath,
+    String? backgroundTaskId,
+    DownloadStatus? status,
+    int? downloadedBytes,
+    int? speed,
+    bool? waitingForWifi,
+    DateTime? createdAt,
+    DateTime? completedAt,
+    String? errorMessage,
+  }) {
+    return DownloadTaskModel(
+      id: id ?? this.id,
+      fileName: fileName ?? this.fileName,
+      fileUri: fileUri ?? this.fileUri,
+      downloadUrl: downloadUrl ?? this.downloadUrl,
+      fileSize: fileSize ?? this.fileSize,
+      savePath: savePath ?? this.savePath,
+      backgroundTaskId: backgroundTaskId ?? this.backgroundTaskId,
+      status: status ?? this.status,
+      downloadedBytes: downloadedBytes ?? this.downloadedBytes,
+      speed: speed ?? this.speed,
+      waitingForWifi: waitingForWifi ?? this.waitingForWifi,
+      createdAt: createdAt ?? this.createdAt,
+      completedAt: completedAt ?? this.completedAt,
+      errorMessage: errorMessage ?? this.errorMessage,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'fileName': fileName,
+      'fileUri': fileUri,
+      'downloadUrl': downloadUrl,
+      'fileSize': fileSize,
+      'savePath': savePath,
+      'backgroundTaskId': backgroundTaskId,
+      'status': status.index,
+      'downloadedBytes': downloadedBytes,
+      'speed': speed,
+      'createdAt': createdAt.toIso8601String(),
+      'completedAt': completedAt?.toIso8601String(),
+      'errorMessage': errorMessage,
+    };
+  }
+
+  factory DownloadTaskModel.fromJson(Map<String, dynamic> json) {
+    return DownloadTaskModel(
+      id: json['id'] as String,
+      fileName: json['fileName'] as String,
+      fileUri: json['fileUri'] as String,
+      downloadUrl: json['downloadUrl'] as String?,
+      fileSize: json['fileSize'] as int,
+      savePath: json['savePath'] as String,
+      backgroundTaskId: json['backgroundTaskId'] as String?,
+      status: DownloadStatus.values[json['status'] as int? ?? 0],
+      downloadedBytes: json['downloadedBytes'] as int? ?? 0,
+      speed: json['speed'] as int? ?? 0,
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'] as String)
+          : null,
+      completedAt: json['completedAt'] != null
+          ? DateTime.parse(json['completedAt'] as String)
+          : null,
+      errorMessage: json['errorMessage'] as String?,
+    );
+  }
+
+  /// 转换为 drift Companion（用于 upsert 到 download_tasks 表）
+  ///
+  /// waitingForWifi 不持久化（与原 _saveTasks 一致）。
+  DownloadTasksCompanion toCompanion() {
+    return DownloadTasksCompanion(
+      id: Value(id),
+      fileName: Value(fileName),
+      fileUri: Value(fileUri),
+      downloadUrl: Value(downloadUrl),
+      fileSize: Value(fileSize),
+      savePath: Value(savePath),
+      backgroundTaskId: Value(backgroundTaskId),
+      status: Value(status.index),
+      downloadedBytes: Value(downloadedBytes),
+      speed: Value(speed),
+      createdAt: Value(createdAt.toIso8601String()),
+      completedAt: Value(completedAt?.toIso8601String()),
+      errorMessage: Value(errorMessage),
+      updatedAt: Value(DateTime.now().toIso8601String()),
+    );
+  }
+
+  /// 从 drift Entry 创建（用于查询结果转换）
+  factory DownloadTaskModel.fromEntry(DownloadTaskEntry entry) {
+    return DownloadTaskModel(
+      id: entry.id,
+      fileName: entry.fileName,
+      fileUri: entry.fileUri,
+      downloadUrl: entry.downloadUrl,
+      fileSize: entry.fileSize,
+      savePath: entry.savePath,
+      backgroundTaskId: entry.backgroundTaskId,
+      status: DownloadStatus.values[entry.status],
+      downloadedBytes: entry.downloadedBytes,
+      speed: entry.speed,
+      createdAt: DateTime.parse(entry.createdAt),
+      completedAt:
+          entry.completedAt == null ? null : DateTime.parse(entry.completedAt!),
+      errorMessage: entry.errorMessage,
+    );
+  }
+}

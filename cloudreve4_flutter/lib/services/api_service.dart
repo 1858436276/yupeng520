@@ -1,0 +1,568 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
+import '../core/utils/direct_http_client.dart';
+import '../config/api_config.dart';
+import '../services/storage_service.dart';
+import '../core/exceptions/app_exception.dart';
+import '../core/utils/app_logger.dart';
+import '../core/utils/user_friendly_error.dart';
+
+/// API响应
+class ApiResponse<T> {
+  final int code;
+  final String message;
+  final dynamic data;
+  final String? error;
+  final String? correlationId;
+
+  ApiResponse({
+    required this.code,
+    required this.message,
+    this.data,
+    this.error,
+    this.correlationId,
+  });
+
+  factory ApiResponse.fromJson(Map<String, dynamic> json) {
+    return ApiResponse<T>(
+      code: json['code'] as int? ?? 0,
+      message: json['msg']?.toString() ??
+          json['message']?.toString() ??
+          json['error']?.toString() ??
+          '',
+      data: json['data'],
+      error: json['error']?.toString(),
+      correlationId: json['correlation_id'] as String?,
+    );
+  }
+
+  bool get isSuccess => code == 0;
+
+  bool get isContinue => code == 203;
+}
+
+/// API服务
+class ApiService {
+  late Dio _dio;
+  static ApiService? _instance;
+  bool _isRefreshing = false;
+  final List<Completer<void>> _refreshSubscribers = [];
+  bool _initialized = false;
+
+  /// 获取 token 的回调
+  Future<String?> Function()? getTokenCallback;
+
+  /// 刷新 token 的回调
+  Future<void> Function()? refreshTokenCallback;
+
+  /// 清除认证数据的回调
+  Future<void> Function()? clearAuthCallback;
+
+  /// 凭证过期回调（仅跳转登录页，不清除保存的账号密码）
+  void Function()? onCredentialExpired;
+
+  ApiService._() {
+    _dio = Dio(
+      BaseOptions(
+        baseUrl: ApiConfig.defaultBaseUrl,
+        connectTimeout: const Duration(seconds: ApiConfig.connectTimeout),
+        receiveTimeout: const Duration(seconds: ApiConfig.receiveTimeout),
+        sendTimeout: const Duration(seconds: ApiConfig.sendTimeout),
+        headers: {'Content-Type': 'application/json'},
+      ),
+    );
+    _dio.httpClientAdapter = DirectHttpClientFactory.dioAdapter(
+      connectionTimeout: const Duration(seconds: ApiConfig.connectTimeout),
+    );
+
+    _dio.interceptors.add(_requestInterceptor());
+    _dio.interceptors.add(_responseInterceptor());
+    _dio.interceptors.add(_errorInterceptor());
+  }
+
+  /// 是否正在刷新token
+  bool get isRefreshing => _isRefreshing;
+
+  /// 暴露 Dio 实例（用于二进制下载等不走 _parseResponse 的场景）
+  Dio get dio => _dio;
+
+  /// 获取单例
+  static ApiService get instance {
+    _instance ??= ApiService._();
+    return _instance!;
+  }
+
+  /// 设置认证回调
+  /// 由 AuthProvider 在初始化时调用
+  static void setAuthCallbacks({
+    required Future<String?> Function() getToken,
+    required Future<void> Function() refreshToken,
+    required Future<void> Function() clearAuth,
+    void Function()? onCredentialExpired,
+  }) {
+    final service = instance;
+    service.getTokenCallback = getToken;
+    service.refreshTokenCallback = refreshToken;
+    service.clearAuthCallback = clearAuth;
+    service.onCredentialExpired = onCredentialExpired;
+  }
+
+  /// 初始化API服务（设置正确的baseUrl）
+  Future<void> init() async {
+    if (_initialized) return;
+
+    final baseUrl = await ApiConfig.baseUrl;
+    _dio.options.baseUrl = baseUrl;
+    _initialized = true;
+  }
+
+  /// 动态设置 API baseUrl
+  Future<void> setBaseUrl(String baseUrl) async {
+    _dio.options.baseUrl = baseUrl;
+    AppLogger.d('ApiService baseUrl 已更新为: $baseUrl');
+  }
+
+  /// 请求拦截器
+  Interceptor _requestInterceptor() {
+    return InterceptorsWrapper(
+      onRequest: (options, handler) async {
+        // 从回调获取 Token
+        if (getTokenCallback != null) {
+          final token = await getTokenCallback!();
+          if (token != null && token.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $token';
+          }
+        }
+        // 附加 X-Cr-Client-Id，服务端据此过滤 SSE 自身事件
+        try {
+          final clientId = await StorageService.instance.getOrCreateClientId();
+          options.headers['X-Cr-Client-Id'] = clientId;
+        } catch (_) {}
+        return handler.next(options);
+      },
+    );
+  }
+
+  /// 响应拦截器
+  Interceptor _responseInterceptor() {
+    return InterceptorsWrapper(
+      onResponse: (response, handler) async {
+        AppLogger.d(
+          'API Response: ${response.statusCode} - ${response.requestOptions.uri}',
+        );
+
+        // 检查 JSON 响应中的 code 字段
+        if (response.data is Map<String, dynamic>) {
+          final data = response.data as Map<String, dynamic>;
+          final code = data['code'] as int?;
+          AppLogger.d('_responseInterceptor -> JSON code: $code');
+          if (code == 401) {
+            // HTTP 200 但 JSON code 是 401，刷新 token 并重试原始请求。
+            // 旧实现只异步刷新不重试，导致首发请求（如概览页 loadCapacity）
+            // 在 token 过期时直接失败，即使 token 刷新成功也不会重新加载。
+            final options = response.requestOptions;
+            final isNoAuth = options.extra['noAuth'] as bool? ?? false;
+            final isRefreshPath =
+                options.path.contains('/session/token/refresh');
+            final alreadyRetried =
+                options.extra['_retried401'] as bool? ?? false;
+            AppLogger.d(
+                '_responseInterceptor -> 401 isNoAuth=$isNoAuth isRefreshPath=$isRefreshPath alreadyRetried=$alreadyRetried');
+            if (!isNoAuth && !isRefreshPath && !alreadyRetried) {
+              // 标记已重试，防止重试响应再次 401 时无限循环
+              options.extra['_retried401'] = true;
+              final retried = await _refreshAndRetry(options);
+              if (retried != null) {
+                return handler.resolve(retried);
+              }
+            }
+          } else if (code == 40020) {
+            // Invalid Credentials — refreshToken 也失效，凭证过期
+            AppLogger.d('_responseInterceptor -> 凭证过期 (code 40020)');
+            _handleCredentialExpired();
+          }
+        }
+        return handler.next(response);
+      },
+    );
+  }
+
+  /// 刷新 token 并重试原始请求（用于 HTTP 200 + code 401 的情况）。
+  /// 返回重试响应；刷新失败或重试失败时返回 null，由调用方放行原 401 响应。
+  /// 与 _handle401Error（HTTP 401 路径）共用 _isRefreshing/_refreshSubscribers，
+  /// 保证并发请求只刷新一次。
+  Future<Response?> _refreshAndRetry(RequestOptions requestOptions) async {
+    if (_isRefreshing) {
+      // 已有刷新在进行，等待完成后重试
+      final completer = Completer<void>();
+      _refreshSubscribers.add(completer);
+      try {
+        await completer.future;
+      } catch (_) {
+        return null;
+      }
+    } else {
+      _isRefreshing = true;
+      try {
+        AppLogger.d('_refreshAndRetry -> 开始刷新 token');
+        if (refreshTokenCallback != null) {
+          await refreshTokenCallback!();
+        }
+        AppLogger.d('_refreshAndRetry -> token 刷新完成');
+      } catch (e) {
+        AppLogger.d('_refreshAndRetry -> 刷新失败: $e');
+        _isRefreshing = false;
+        if (clearAuthCallback != null) {
+          await clearAuthCallback!();
+        }
+        // 通知等待的请求刷新已失败
+        for (final subscriber in _refreshSubscribers) {
+          if (!subscriber.isCompleted) subscriber.completeError(e);
+        }
+        _refreshSubscribers.clear();
+        return null;
+      }
+      _isRefreshing = false;
+      for (final subscriber in _refreshSubscribers) {
+        if (!subscriber.isCompleted) subscriber.complete();
+      }
+      _refreshSubscribers.clear();
+    }
+
+    // 刷新成功，移除旧 Authorization header，让请求拦截器重新添加新 token
+    requestOptions.headers.remove('Authorization');
+    try {
+      return await _dio.fetch(requestOptions);
+    } catch (e) {
+      AppLogger.d('_refreshAndRetry -> 重试请求失败: $e');
+      return null;
+    }
+  }
+
+  /// 处理凭证过期（code 40020），提示用户并跳转登录页
+  void _handleCredentialExpired() {
+    if (onCredentialExpired != null) {
+      onCredentialExpired!();
+    }
+  }
+
+  /// 错误拦截器
+  Interceptor _errorInterceptor() {
+    return InterceptorsWrapper(
+      onError: (error, handler) async {
+        AppLogger.d("_errorInterceptor -> 获取files列表: response");
+        AppLogger.d('API Error: ${error.requestOptions.uri} - ${error.message}');
+
+        // silent404: 调用方标记 404 为预期行为，拦截器不抛异常，直接放行
+        final silent404 = error.requestOptions.extra['silent404'] as bool? ?? false;
+        if (silent404 && error.response?.statusCode == 404) {
+          return handler.next(error);
+        }
+
+        // 检查是否是 401 错误（HTTP 401 或 JSON code: 401）
+        bool is401Error = error.response?.statusCode == 401;
+        if (!is401Error && error.response?.data is Map<String, dynamic>) {
+          final data = error.response!.data as Map<String, dynamic>;
+          is401Error = data['code'] == 401;
+        }
+
+        if (is401Error) {
+          final isNoAuth =
+              error.requestOptions.extra['noAuth'] as bool? ?? false;
+          if (!isNoAuth) {
+            // 不是noAuth请求，需要刷新token
+            final response = await _handle401Error(error, handler);
+            if (response != null) {
+              return handler.resolve(response);
+            }
+          }
+        }
+
+        // 检查是否是凭证过期错误（code 40020）
+        if (error.response?.data is Map<String, dynamic>) {
+          final data = error.response!.data as Map<String, dynamic>;
+          if (data['code'] == 40020) {
+            _handleCredentialExpired();
+            return handler.next(error);
+          }
+        }
+
+        // 处理错误
+        if (error.response == null) {
+          // 网络错误
+          throw NetworkException(
+            '网络连接失败，请检查网络设置',
+            code: error.response?.statusCode,
+          );
+        }
+
+        final statusCode = error.response?.statusCode;
+        final responseData = error.response?.data;
+
+        AppLogger.d('Error Response Data: $responseData');
+
+        if (responseData is Map<String, dynamic>) {
+          final response = ApiResponse.fromJson(responseData);
+          throw ServerException(
+            UserFriendlyError.fromText(
+              response.message,
+              code: response.code,
+              fallback: '请求失败，请稍后重试',
+            ),
+            code: response.code,
+          );
+        }
+
+        throw ServerException(
+          UserFriendlyError.fromText(
+            responseData?.toString(),
+            code: statusCode,
+            fallback: '请求失败，请检查网络或服务器状态后重试',
+          ),
+          code: statusCode,
+        );
+      },
+    );
+  }
+
+  /// 处理401错误，尝试刷新token
+  Future<Response?> _handle401Error(
+    DioException error,
+    ErrorInterceptorHandler handler,
+  ) async {
+    // 检查是否需要跳过token检查（如刷新token请求本身）
+    final path = error.requestOptions.path;
+    if (path.contains('/session/token/refresh')) {
+      // 刷新token的请求也失败了，直接返回错误
+      return null;
+    }
+
+    // 如果正在刷新token，等待刷新完成后再重试
+    if (_isRefreshing) {
+      final completer = Completer<void>();
+      _refreshSubscribers.add(completer);
+
+      // 等待刷新完成
+      await completer.future;
+
+      // 刷新完成后，移除旧的 Authorization header，让拦截器重新添加新 token
+      error.requestOptions.headers.remove('Authorization');
+
+      // 重试请求（拦截器会自动添加新 token）
+      return await _dio.fetch(error.requestOptions);
+    }
+
+    // 开始刷新token
+    _isRefreshing = true;
+
+    try {
+      // 调用回调刷新 token
+      if (refreshTokenCallback != null) {
+        await refreshTokenCallback!();
+      }
+
+      _isRefreshing = false;
+
+      // 通知所有等待的请求可以重试了
+      for (final subscriber in _refreshSubscribers) {
+        if (!subscriber.isCompleted) {
+          subscriber.complete();
+        }
+      }
+      _refreshSubscribers.clear();
+
+      // 重试当前请求：移除旧 header，让拦截器重新添加新 token
+      error.requestOptions.headers.remove('Authorization');
+      return await _dio.fetch(error.requestOptions);
+    } catch (e) {
+      AppLogger.d('Refresh token failed: $e');
+      _isRefreshing = false;
+
+      // 刷新失败，清除认证数据
+      if (clearAuthCallback != null) {
+        await clearAuthCallback!();
+      }
+
+      // 通知所有等待的请求
+      for (final subscriber in _refreshSubscribers) {
+        if (!subscriber.isCompleted) {
+          subscriber.completeError(e);
+        }
+      }
+      _refreshSubscribers.clear();
+
+      // 返回null，让原始错误继续传播
+      return null;
+    }
+  }
+
+  /// GET请求 , 如果是分享请求, 则不进入 _parseResponse
+  Future<T> get<T>(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    bool noAuth = false,
+    bool isNoData = false,
+    bool silent404 = false,
+    Map<String, dynamic>? headers,
+  }) async {
+    final response = await _dio.get<T>(
+      path,
+      queryParameters: queryParameters,
+      options: Options(extra: {'noAuth': noAuth, 'silent404': silent404}, headers: headers),
+    );
+    // 如果是分享请求, 则不进入 _parseResponse
+    if (isNoData) {
+      return response.data as T;
+    }
+    return _parseResponse<T>(response);
+  }
+
+  /// POST请求
+  Future<T> post<T>(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    bool noAuth = false,
+    Map<String, dynamic>? headers,
+    bool isNoData = false,
+  }) async {
+    AppLogger.d('API POST Request: $path');
+    AppLogger.d('Request Data: $data');
+
+    final response = await _dio.post<T>(
+      path,
+      data: data,
+      queryParameters: queryParameters,
+      options: Options(extra: {'noAuth': noAuth}, headers: headers),
+    );
+
+    AppLogger.d('Response Data: ${response.data}');
+    
+    var isActivEmail = 0;
+    if (response.statusCode == 200 && response.data is Map) {
+      final tmp = Map<String, dynamic>.from(response.data as Map);
+      final code = tmp['code'];
+      if (code is int) {
+        isActivEmail = code;
+      }
+    }
+
+    if (isNoData || isActivEmail == 203) {
+      return response.data as T;
+    }
+
+    return _parseResponse<T>(response);
+  }
+
+  /// POST请求（带上传进度）
+  Future<T> postWithProgress<T>(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    bool noAuth = false,
+    Map<String, dynamic>? headers,
+    ProgressCallback? onSendProgress,
+  }) async {
+    AppLogger.d('API POST Request with progress: $path');
+
+    final response = await _dio.post<T>(
+      path,
+      data: data,
+      queryParameters: queryParameters,
+      options: Options(extra: {'noAuth': noAuth}, headers: headers),
+      onSendProgress: onSendProgress,
+    );
+
+    AppLogger.d('Response Data: ${response.data}');
+
+    return _parseResponse<T>(response);
+  }
+
+  /// PUT请求
+  Future<T> put<T>(
+    String path, {
+    dynamic data,
+    bool noAuth = false,
+    bool isNoData = false,
+  }) async {
+    final response = await _dio.put<T>(
+      path,
+      data: data,
+      options: Options(extra: {'noAuth': noAuth}),
+    );
+    // 当请求的接口为创建分享时, 逻辑上不适合走到 _parseResponse -> ApiResponse.fromJson 直接返回结果即可
+    if (isNoData) {
+      return response.data as T;
+    }
+    return _parseResponse<T>(response);
+  }
+
+  /// PATCH请求
+  Future<T> patch<T>(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    bool noAuth = false,
+  }) async {
+    final response = await _dio.patch<T>(
+      path,
+      data: data,
+      queryParameters: queryParameters,
+      options: Options(extra: {'noAuth': noAuth}),
+    );
+    return _parseResponse<T>(response);
+  }
+
+  /// DELETE请求
+  Future<T> delete<T>(
+    String path, {
+    dynamic data,
+    Map<String, dynamic>? queryParameters,
+    bool noAuth = false,
+  }) async {
+    final response = await _dio.delete<T>(
+      path,
+      data: data,
+      queryParameters: queryParameters,
+      options: Options(extra: {'noAuth': noAuth}),
+    );
+    return _parseResponse<T>(response);
+  }
+
+  /// 解析响应
+  T _parseResponse<T>(Response response) {
+    final data = response.data;
+
+    if (data is Map<String, dynamic>) {
+      final apiResponse = ApiResponse<dynamic>.fromJson(data);
+      if (!apiResponse.isSuccess && !apiResponse.isContinue) {
+        throw ServerException(
+          UserFriendlyError.fromText(
+            apiResponse.message,
+            code: apiResponse.code,
+            fallback: '请求失败，请稍后重试',
+          ),
+          code: apiResponse.code,
+        );
+      }
+
+      final payload = apiResponse.data;
+
+      // ApiService 已经把 Cloudreve 外层 {code,msg,data} 拆了一层。
+      // 调用方应直接使用 payload。若 payload 是 List 而泛型写成 Map，
+      // 这里不要再强制把 List 当 Map；优先在类型匹配时返回。
+      if (payload is T) {
+        return payload;
+      }
+
+      if (data is T) {
+        return data as T;
+      }
+
+      return payload as T;
+    }
+
+    return data as T;
+  }
+}

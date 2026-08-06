@@ -1,0 +1,43 @@
+#include "resource.h"
+#include "winres.h"
+
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+
+IDI_APP_ICON ICON "resources\\app_icon.ico"
+
+#define VERSION_AS_NUMBER 1,4,0,1
+#define VERSION_AS_STRING "1.4.0.1"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION VERSION_AS_NUMBER
+ PRODUCTVERSION VERSION_AS_NUMBER
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904e4"
+        BEGIN
+            VALUE "CompanyName", "com.limo" "\0"
+            VALUE "FileDescription", "cloudreve4_flutter" "\0"
+            VALUE "FileVersion", VERSION_AS_STRING "\0"
+            VALUE "InternalName", "cloudreve4_flutter" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.limo.cloudreve4_flutter. All rights reserved." "\0"
+            VALUE "OriginalFilename", "cloudreve4_flutter.exe" "\0"
+            VALUE "ProductName", "cloudreve4_flutter" "\0"
+            VALUE "ProductVersion", VERSION_AS_STRING "\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END

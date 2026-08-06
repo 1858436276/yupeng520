@@ -1,0 +1,517 @@
+import 'package:cloudreve4_flutter/presentation/widgets/toast_helper.dart';
+import 'package:cloudreve4_flutter/presentation/widgets/user_avatar.dart';
+import 'package:flutter/foundation.dart';
+import '../../data/models/server_model.dart';
+import '../../data/models/user_model.dart';
+import '../../services/auth_service.dart';
+import '../../services/server_service.dart';
+import '../../services/storage_service.dart';
+import '../../services/api_service.dart';
+import '../../core/exceptions/app_exception.dart';
+import '../../core/utils/app_logger.dart';
+import '../../core/utils/user_friendly_error.dart';
+
+/// 认证状态
+enum AuthState { loading, authenticated, unauthenticated, error }
+
+/// 认证Provider
+class AuthProvider extends ChangeNotifier {
+  AuthState _state = AuthState.unauthenticated;
+  UserModel? _user;
+  String? _errorMessage;
+  bool _hasRefreshTokenExpired = false;
+
+  AuthState get state => _state;
+  UserModel? get user => _user;
+  String? get errorMessage => _errorMessage;
+  bool get isAuthenticated => _state == AuthState.authenticated;
+  bool get isLoading => _state == AuthState.loading;
+  bool get hasRefreshTokenExpired => _hasRefreshTokenExpired;
+  bool get isAdmin {
+    final name = _user?.group?.name.toLowerCase();
+    return name == 'admin' || name == '管理员';
+  }
+
+  /// 当前选中的服务器
+  ServerModel? get currentServer => ServerService.instance.currentServer;
+
+  /// 获取当前用户的 token
+  TokenModel? get token => _user?.token;
+
+  /// 初始化
+  Future<void> init() async {
+    try {
+      setState(AuthState.loading);
+
+      // 初始化服务器服务
+      await ServerService.instance.init();
+
+      // 获取当前服务器
+      final server = ServerService.instance.currentServer;
+      if (server == null) {
+        setState(AuthState.unauthenticated);
+        return;
+      }
+
+      // 设置 API 的 baseUrl
+      await _setApiBaseUrl(server.baseUrl);
+
+      // 设置 ApiService 的认证回调
+      _setupApiCallbacks();
+
+      // 检查是否有保存的登录信息
+      if (server.user != null && server.user!.token != null) {
+        // 有保存的用户信息，检查 token 是否过期
+        if (!server.user!.token!.isRefreshTokenExpired) {
+          // Refresh token 未过期，设置用户信息
+          var user = server.user!;
+          setUser(user);
+          // access token 已过期但 refresh token 未过期时，先静默刷新，
+          // 避免后续请求（如概览页 loadCapacity）带着过期 token 触发 401 而首发失败。
+          // 这里直接调 AuthService 而非 refreshToken()，避免在启动阶段弹 toast。
+          if (user.token!.isAccessTokenExpired) {
+            try {
+              final newToken = await AuthService.instance.refreshToken(
+                user.token!.refreshToken,
+              );
+              user = user.copyWith(token: newToken);
+              await ServerService.instance.updateCurrentServerLogin(user: user);
+              setUser(user);
+            } catch (e) {
+              AppLogger.d('启动刷新 access token 失败: $e');
+              await ServerService.instance.clearCurrentServerLogin();
+              _user = null;
+              setState(AuthState.unauthenticated);
+              return;
+            }
+          }
+          setState(AuthState.authenticated);
+          return;
+        } else {
+          // Refresh token 已过期，清除登录信息
+          await ServerService.instance.clearCurrentServerLogin();
+        }
+      }
+
+      _user = null;
+      setState(AuthState.unauthenticated);
+    } catch (e) {
+      AppLogger.d('AuthProvider 初始化失败: $e');
+      _user = null;
+      setState(AuthState.unauthenticated);
+    }
+  }
+
+  /// 设置 ApiService 的认证回调
+  void _setupApiCallbacks() {
+    ApiService.setAuthCallbacks(
+      getToken: () async {
+        // 返回当前的 access token
+        return _user?.token?.accessToken;
+      },
+      refreshToken: () async {
+        // 刷新 token
+        try {
+          await refreshToken();
+        } catch (e) {
+          // 刷新失败，设置过期标志
+          if (e is RefreshTokenExpiredException) {
+            setRefreshTokenExpired();
+          }
+          rethrow;
+        }
+      },
+      clearAuth: () async {
+        // 清除认证数据
+        await ServerService.instance.clearCurrentServerLogin();
+        setRefreshTokenExpired();
+      },
+      onCredentialExpired: () {
+        // 凭证过期，仅跳转登录页，不清除保存的账号密码
+        setRefreshTokenExpired();
+      },
+    );
+  }
+
+  /// 设置 API baseUrl
+  Future<void> _setApiBaseUrl(String baseUrl) async {
+    // 同时更新存储和 ApiService 的 baseUrl
+    final storageService = StorageService.instance;
+    await storageService.setCustomBaseUrl(baseUrl);
+    await ApiService.instance.setBaseUrl(baseUrl);
+  }
+
+  /// 密码登录
+Future<bool> passwordLogin({
+  required String email,
+  required String password,
+  bool rememberMe = false,
+  String? captcha,
+  String? ticket,
+}) async {
+  try {
+    setState(AuthState.loading);
+
+    // 获取当前服务器
+    final server = ServerService.instance.currentServer;
+    if (server == null) {
+      _errorMessage = '请先选择服务器';
+      _user = null;
+      setState(AuthState.error);
+      return false;
+    }
+
+    // 每次登录时都重新设置 API 的 baseUrl，确保使用最新的服务器地址
+    await _setApiBaseUrl(server.baseUrl);
+
+    // 执行登录
+    final response = await AuthService.instance.passwordLogin(
+      email: email,
+      password: password,
+      captcha: captcha,
+      ticket: ticket,
+    );
+
+    AppLogger.d('AuthProvider 登录成功: $response');
+
+    // 保存登录信息到当前服务器（包含完整 user 和 token）
+    await ServerService.instance.updateCurrentServerLogin(
+      email: rememberMe ? email : null,
+      password: rememberMe ? password : null,
+      user: response.user,
+      rememberMe: rememberMe,
+    );
+
+    setUser(response.user);
+    setState(AuthState.authenticated);
+
+    return true;
+  } on TwoFactorRequiredException {
+    // 两步验证需要，不设置 error 状态，重新抛出让调用方处理
+    setState(AuthState.unauthenticated);
+    rethrow;
+  } catch (e) {
+    _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+    _user = null;
+    setState(AuthState.error);
+    return false;
+  }
+}
+
+  /// 两步验证登录
+  Future<bool> twoFactorLogin({
+    required String otp,
+    required String sessionId,
+    required String email,
+    required String password,
+    bool rememberMe = false,
+  }) async {
+    try {
+      setState(AuthState.loading);
+
+      final response = await AuthService.instance.twoFactorLogin(
+        otp: otp,
+        sessionId: sessionId,
+      );
+
+      await ServerService.instance.updateCurrentServerLogin(
+        email: rememberMe ? email : null,
+        password: rememberMe ? password : null,
+        user: response.user,
+        rememberMe: rememberMe,
+      );
+
+      setUser(response.user);
+      setState(AuthState.authenticated);
+      return true;
+    } catch (e) {
+      _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+      _user = null;
+      // 2FA 验证失败仍然停留在登录流程，不应把全局认证状态切到 error，
+      // 否则登录页/弹窗可能被错误状态打断。
+      setState(AuthState.unauthenticated);
+      return false;
+    }
+  }
+
+  /// 登出
+  Future<void> logout() async {
+    try {
+      // 调用登出 API（需要 token）
+      if (token?.refreshToken != null) {
+        try {
+          await AuthService.instance.logout();
+        } catch (e) {
+          // 登出 API 调用失败不影响本地清理
+          AppLogger.d('登出 API 调用失败: $e');
+        }
+      }
+
+      // 清除当前服务器的登录信息
+      await ServerService.instance.clearCurrentServerLogin();
+
+      _clearUserData();
+      // 清除头像缓存
+      await UserAvatar.clearAllCache();
+      setState(AuthState.unauthenticated);
+    } catch (e) {
+      // 即使出错也要清除本地状态
+      _clearUserData();
+      setState(AuthState.unauthenticated);
+      _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+    }
+  }
+
+  /// 刷新用户信息
+  Future<void> refreshUser() async {
+    try {
+      final user = await AuthService.instance.getCurrentUser();
+      setUser(user);
+
+      // 更新服务器中的用户信息（保留 token）
+      final server = ServerService.instance.currentServer;
+      if (server != null && token != null) {
+        await ServerService.instance.updateCurrentServerLogin(
+          user: user.copyWith(token: token),
+        );
+      }
+    } catch (e) {
+      _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+    }
+  }
+
+  /// 刷新 token
+  Future<void> refreshToken() async {
+    try {
+      final currentToken = token;
+      if (currentToken == null || currentToken.isRefreshTokenExpired) {
+        ToastHelper.failure('已注销或Refresh token 已过期，需要重新登录');
+        throw Exception('Refresh token 已过期，需要重新登录');
+      }
+
+      // 调用刷新 token 接口
+      final newToken = await AuthService.instance.refreshToken(currentToken.refreshToken);
+
+      // 更新用户信息中的 token
+      final updatedUser = _user!.copyWith(token: newToken);
+
+      // 保存到服务器
+      await ServerService.instance.updateCurrentServerLogin(user: updatedUser);
+
+      setUser(updatedUser);
+    } catch (e) {
+      ToastHelper.error('刷新 token 失败: $e');
+      AppLogger.d('刷新 token 失败: $e');
+      _user = null;
+      _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// 设置用户
+  void setUser(UserModel? user) {
+    _user = user;
+    notifyListeners();
+  }
+
+  /// 设置状态
+  void setState(AuthState state) {
+    _state = state;
+    notifyListeners();
+  }
+
+  /// 清除错误
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// 清除用户数据
+  void _clearUserData() {
+    _user = null;
+    _errorMessage = null;
+    _hasRefreshTokenExpired = false;
+    notifyListeners();
+  }
+
+  /// 处理 RefreshTokenExpiredException
+  void setRefreshTokenExpired() {
+    _hasRefreshTokenExpired = true;
+    notifyListeners();
+  }
+
+  void clearRefreshTokenExpired() {
+    _hasRefreshTokenExpired = false;
+    notifyListeners();
+  }
+
+  /// 切换到当前站点下已保存的账号。
+  Future<bool> switchToAccount(String accountKey) async {
+    try {
+      setState(AuthState.loading);
+
+      await ServerService.instance.switchCurrentServerAccount(accountKey);
+      final server = ServerService.instance.currentServer;
+      if (server == null) {
+        _user = null;
+        setState(AuthState.unauthenticated);
+        return false;
+      }
+
+      await _setApiBaseUrl(server.baseUrl);
+      _setupApiCallbacks();
+
+      final savedUser = server.user;
+      if (savedUser != null &&
+          savedUser.token != null &&
+          !savedUser.token!.isRefreshTokenExpired) {
+        setUser(savedUser);
+        _hasRefreshTokenExpired = false;
+        setState(AuthState.authenticated);
+        return true;
+      }
+
+      _user = null;
+      setState(AuthState.unauthenticated);
+      return false;
+    } catch (e) {
+      _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+      _user = null;
+      setState(AuthState.error);
+      return false;
+    }
+  }
+
+  /// 兼容旧入口：切换服务器配置。
+  Future<bool> switchToServerAccount(String label) async {
+    try {
+      setState(AuthState.loading);
+
+      await ServerService.instance.selectServer(label);
+      final server = ServerService.instance.currentServer;
+      if (server == null) {
+        _user = null;
+        setState(AuthState.unauthenticated);
+        return false;
+      }
+
+      await _setApiBaseUrl(server.baseUrl);
+      _setupApiCallbacks();
+
+      final savedUser = server.user;
+      if (savedUser != null &&
+          savedUser.token != null &&
+          !savedUser.token!.isRefreshTokenExpired) {
+        setUser(savedUser);
+        _hasRefreshTokenExpired = false;
+        setState(AuthState.authenticated);
+        return true;
+      }
+
+      _user = null;
+      setState(AuthState.unauthenticated);
+      return false;
+    } catch (e) {
+      _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+      _user = null;
+      setState(AuthState.error);
+      return false;
+    }
+  }
+
+  /// 准备在当前站点添加另一个账号。
+  ///
+  /// 不清空当前账号、不创建空账号槽。
+  /// 用户进入登录页后：
+  /// - 登录成功：新账号会通过 updateCurrentServerLogin 写入 accounts 并成为当前账号；
+  /// - 直接返回：原账号仍保持登录，账号列表不会出现空账号。
+  Future<void> createAccountSlotForCurrentSite() async {
+    final current = ServerService.instance.currentServer;
+    if (current == null) {
+      throw Exception('当前没有选中的站点');
+    }
+
+    await _setApiBaseUrl(current.baseUrl);
+    _setupApiCallbacks();
+
+    _errorMessage = null;
+    _hasRefreshTokenExpired = false;
+    notifyListeners();
+  }
+
+  /// 删除当前站点保存的账号。
+  ///
+  /// 如果删除的是当前账号，会退出到未登录状态。
+  Future<bool> removeSavedAccount(String accountKey) async {
+    try {
+      final removingCurrent =
+          _user != null && (_user!.id == accountKey || _user!.email == accountKey);
+
+      await ServerService.instance.removeCurrentServerAccount(accountKey);
+
+      if (removingCurrent) {
+        _clearUserData();
+        setState(AuthState.unauthenticated);
+      } else {
+        notifyListeners();
+      }
+
+      return removingCurrent;
+    } catch (e) {
+      _errorMessage = UserFriendlyError.fromObject(
+        e,
+        action: 'login',
+        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
+      );
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// 获取上次登录的邮箱（用于填充输入框）
+  String? get rememberedEmail {
+    final server = ServerService.instance.currentServer;
+    return server?.email;
+  }
+
+  /// 获取上次登录的密码（用于填充输入框）
+  String? get rememberedPassword {
+    final server = ServerService.instance.currentServer;
+    return server?.password;
+  }
+
+  /// 是否记住密码
+  bool get rememberMe {
+    final server = ServerService.instance.currentServer;
+    return server?.rememberMe ?? false;
+  }
+}

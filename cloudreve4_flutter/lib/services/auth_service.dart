@@ -1,0 +1,324 @@
+import '../data/models/login_config_model.dart';
+import '../data/models/user_model.dart';
+import 'api_service.dart';
+import '../core/utils/app_logger.dart';
+import '../core/exceptions/app_exception.dart';
+
+/// 认证服务
+class AuthService {
+  AuthService._internal();
+
+  static final AuthService _instance = AuthService._internal();
+
+  static AuthService get instance => _instance;
+
+  /// 准备登录
+  Future<Map<String, bool>> prepareLogin(String email) async {
+    final response = await ApiService.instance.get<Map<String, dynamic>>(
+      '/session/prepare',
+      queryParameters: {'email': email},
+      noAuth: true,
+    );
+    return response as Map<String, bool>;
+  }
+
+  /// 获取登录配置（是否需要验证码、是否允许注册等）
+  Future<LoginConfigModel> getLoginConfig() async {
+    final response = await ApiService.instance.get<Map<String, dynamic>>(
+      '/site/config/login',
+      noAuth: true,
+    );
+
+    final data = response['data'];
+    if (data is Map<String, dynamic>) {
+      return LoginConfigModel.fromJson(data);
+    }
+    if (data is Map) {
+      return LoginConfigModel.fromJson(Map<String, dynamic>.from(data));
+    }
+
+    return LoginConfigModel.fromJson(response);
+  }
+
+  /// 获取图形验证码
+  Future<Map<String, String>> getCaptcha() async {
+    final response = await ApiService.instance.get<Map<String, dynamic>>(
+      '/site/captcha',
+      noAuth: true,
+    );
+
+    // 兼容 ApiService 已经解包 data 的情况，以及未解包的原始响应。
+    final data = response['data'] is Map
+        ? Map<String, dynamic>.from(response['data'] as Map)
+        : response;
+
+    return {
+      'image': data['image'] as String? ?? '',
+      'ticket': data['ticket'] as String? ?? '',
+    };
+  }
+
+
+  /// 获取站点基础配置
+  ///
+  /// 登录页用这个接口读取验证码类型：
+  /// - captcha_type: normal / recaptcha / turnstile / cap
+  /// - captcha_ReCaptchaKey
+  /// - turnstile_site_id
+  /// - captcha_cap_instance_url
+  /// - captcha_cap_site_key
+  /// - captcha_cap_asset_server
+  Future<Map<String, dynamic>> getBasicSiteConfig() async {
+    final response = await ApiService.instance.get<Map<String, dynamic>>(
+      '/site/config/basic',
+      noAuth: true,
+    );
+
+    AppLogger.d('AuthService -> 站点基础配置响应: $response');
+
+    final data = response['data'];
+    if (data is Map<String, dynamic>) {
+      return data;
+    }
+    if (data is Map) {
+      return Map<String, dynamic>.from(data);
+    }
+
+    // 兼容 ApiService 已经解包 data 的情况。
+    return response;
+  }
+
+  /// 密码登录
+  Future<LoginResponseModel> passwordLogin({
+    required String email,
+    required String password,
+    String? captcha,
+    String? ticket,
+  }) async {
+    final data = <String, dynamic>{
+      'email': email,
+      'password': password,
+      if (captcha != null && captcha.isNotEmpty) 'captcha': captcha,
+      if (ticket != null && ticket.isNotEmpty) 'ticket': ticket,
+    };
+
+    final response = await ApiService.instance.post<Map<String, dynamic>>(
+      '/session/token',
+      data: data,
+      noAuth: true,
+    );
+
+    AppLogger.d('AuthService -> 登录响应: $response');
+
+    // Cloudreve code 203 表示需要两步验证。
+    // ApiService 对 203 会返回原始响应，所以这里要兼容 data 为字符串或 Map 的情况。
+    final code = response['code'] as int?;
+    if (code == 203) {
+      final sessionId = _extractTwoFactorSessionId(response);
+      if (sessionId == null || sessionId.isEmpty) {
+        throw ServerException('两步验证会话无效，请重新登录', code: 203);
+      }
+      throw TwoFactorRequiredException(sessionId);
+    }
+
+    return LoginResponseModel.fromJson(response);
+  }
+
+  String? _extractTwoFactorSessionId(Map<String, dynamic> response) {
+    final data = response['data'];
+
+    if (data is String) {
+      return data.trim();
+    }
+
+    if (data is Map) {
+      final map = Map<String, dynamic>.from(data);
+      final value = map['session_id'] ?? map['sessionId'] ?? map['session'];
+      return value?.toString().trim();
+    }
+
+    final value = response['session_id'] ?? response['sessionId'] ?? response['session'];
+    return value?.toString().trim();
+  }
+
+  /// 2FA登录
+  Future<LoginResponseModel> twoFactorLogin({
+    required String otp,
+    required String sessionId,
+  }) async {
+    final data = <String, dynamic>{'otp': otp, 'session_id': sessionId};
+
+    final response = await ApiService.instance.post<Map<String, dynamic>>(
+      '/session/token/2fa',
+      data: data,
+      noAuth: true,
+    );
+
+    return LoginResponseModel.fromJson(response);
+  }
+
+  /// 刷新Token
+  /// 这个方法现在由 ApiService 调用，传入当前的 refreshToken
+  Future<TokenModel> refreshToken(String refreshToken) async {
+    final data = <String, dynamic>{'refresh_token': refreshToken};
+
+    final response = await ApiService.instance.post<Map<String, dynamic>>(
+      '/session/token/refresh',
+      data: data,
+      noAuth: true,
+    );
+
+    return TokenModel.fromJson(response);
+  }
+
+  /// 登出
+  /// 现在由 ServerService 和 AuthProvider 负责清除本地数据
+  Future<void> logout() async {
+    try {
+      // 登出需要调用 API，但 refreshToken 由调用方提供
+      // 这个方法现在主要用于调用登出 API
+      await ApiService.instance.delete<void>(
+        '/session/token',
+        data: <String, dynamic>{},
+        noAuth: true,
+      );
+    } catch (e) {
+      // 登出失败也要清除本地数据（由调用方处理）
+      rethrow;
+    }
+  }
+
+  /// 获取当前用户信息
+  Future<UserModel> getCurrentUser() async {
+    final response = await ApiService.instance.get<Map<String, dynamic>>(
+      '/user/me',
+    );
+    return UserModel.fromJson(response);
+  }
+
+  /// 获取用户容量
+  Future<CapacityModel> getUserCapacity() async {
+    final response = await ApiService.instance.get<Map<String, dynamic>>(
+      '/user/capacity',
+    );
+    return CapacityModel.fromJson(response);
+  }
+
+  /// 发送重置密码邮件
+  Future<void> sendResetPasswordEmail({
+    required String email,
+    String? captcha,
+    String? ticket,
+  }) async {
+    final data = <String, dynamic>{
+      'email': email,
+      ...captcha != null ? {'captcha': captcha} : {},
+      ...ticket != null ? {'ticket': ticket} : {},
+    };
+
+    final response = await ApiService.instance.post<Map<String, dynamic>>(
+      '/user/reset',
+      data: data,
+      noAuth: true,
+      isNoData: true,
+    );
+
+    final code = response['code'] as int?;
+    if (code != 0) {
+      final msg = response['msg'] as String? ?? '发送失败';
+      throw Exception(msg);
+    }
+  }
+
+  /// 用户注册
+  Future<SignUpResponse> signUp({
+    required String email,
+    required String password,
+    String? language,
+    String? captcha,
+    String? ticket,
+  }) async {
+    final data = <String, dynamic>{
+      'email': email,
+      'password': password,
+      ...language != null ? {'language': language} : {},
+      ...captcha != null ? {'captcha': captcha} : {},
+      ...ticket != null ? {'ticket': ticket} : {},
+    };
+
+    // 历史实现是因为邮箱验证, 测试站点code恒定为 203, 而没有考虑非强制邮箱验证的场景, 导致注册实际成功, 但ui显示注册失败。
+    // fixed: 使用 isNoData: true 拿到完整的原始响应 {code, data, msg}，
+    // 因为 _parseResponse 在 code == 0 时会解包返回 data 字段内容，
+    // 导致这里取不到 code/msg（注册成功反而报"注册失败: null -> null"）。
+    // 这与 sendResetPasswordEmail 的处理方式一致。
+    final response = await ApiService.instance.post<Map<String, dynamic>>(
+      '/user',
+      data: data,
+      noAuth: true,
+      isNoData: true,
+    );
+
+    final code = response['code'] as int?;
+    final msg = response['msg'] as String?;
+
+    if (code != 0 && code != 203) {
+      throw Exception('注册失败, code: $code -> msg: $msg');
+    }
+
+    return SignUpResponse(
+      code: code ?? 0,
+      msg: msg,
+      requiresEmailActivation: code == 203,
+    );
+  }
+}
+
+/// 注册响应
+class SignUpResponse {
+  final int code;
+  final String? msg;
+  final bool requiresEmailActivation;
+
+  SignUpResponse({
+    required this.code,
+    this.msg,
+    required this.requiresEmailActivation,
+  });
+}
+
+/// 登录响应模型
+/// 这个模型现在将 token 合并到 user 中返回
+class LoginResponseModel {
+  final UserModel user;
+
+  LoginResponseModel({required this.user});
+
+  factory LoginResponseModel.fromJson(Map<String, dynamic> json) {
+    // 检查是否为错误响应（包含 code 和 msg 但没有 data 或 user）
+    final code = json['code'] as int?;
+    final msg = json['msg'] as String?;
+    final Map<String, dynamic>? data = json['data'] as Map<String, dynamic>?;
+
+    // 如果 code 不是 0，说明是错误响应
+    if (code != null && code != 0) {
+      throw Exception(msg ?? '登录失败');
+    }
+
+    // 如果没有 data 且也没有 user，说明是错误响应
+    if (data == null && json['user'] == null) {
+      throw Exception(msg ?? '登录失败');
+    }
+
+    final Map<String, dynamic> userData = data ?? json;
+    final userJson = userData['user'] as Map<String, dynamic>;
+
+    // 将 token 合并到 user 中
+    userJson['token'] = userData['token'];
+
+    return LoginResponseModel(user: UserModel.fromJson(userJson));
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'user': user.toJson()};
+  }
+}
