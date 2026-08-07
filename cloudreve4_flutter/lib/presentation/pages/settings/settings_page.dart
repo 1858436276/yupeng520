@@ -139,7 +139,7 @@ class _SettingsPageState extends State<SettingsPage> {
               if (mkw_update.mkwShowUpdateEntry) ListTile(
                 leading: const Icon(Icons.info_outline),
                 title: const Text('应用名称'),
-                subtitle: const Text('Cloudreve V4.0'),
+                subtitle: const Text('小白云盘 V4.0'),
               ),
               if (mkw_update.mkwShowUpdateEntry) ListTile(
                 leading: const Icon(Icons.tag),

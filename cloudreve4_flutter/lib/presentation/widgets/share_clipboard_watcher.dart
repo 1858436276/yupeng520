@@ -225,7 +225,7 @@ class _ShareClipboardPrompt extends StatelessWidget {
                               ),
                               const SizedBox(height: 3),
                               Text(
-                                '剪贴板中有一个 Cloudreve 分享，是否立即读取？',
+                                '剪贴板中有一个小白云盘分享，是否立即读取？',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
                                 ),

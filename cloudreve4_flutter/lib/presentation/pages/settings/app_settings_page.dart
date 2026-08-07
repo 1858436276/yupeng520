@@ -396,7 +396,7 @@ class _AppSettingsPageState extends State<AppSettingsPage> {
                         SwitchListTile(
                           secondary: const Icon(Icons.rocket_launch_outlined),
                           title: const Text('开机自启动'),
-                          subtitle: const Text('登录系统后自动启动 Cloudreve'),
+                          subtitle: const Text('登录系统后自动启动小白云盘'),
                           value: _launchAtStartupEnabled,
                           onChanged: _desktopSystemSaving
                               ? null

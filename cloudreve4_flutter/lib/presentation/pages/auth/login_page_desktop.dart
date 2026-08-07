@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 
 import 'package:cloudreve4_flutter/data/models/login_config_model.dart';
 import 'package:cloudreve4_flutter/main.dart' show isOnLoginPage;
+import 'package:cloudreve4_flutter/presentation/widgets/agreement_checkbox.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:cloudreve4_flutter/services/captcha_service.dart';
 import 'package:flutter/material.dart';
@@ -68,6 +69,7 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
   bool _obscureRegisterPassword = true;
   bool _obscureRegisterConfirmPassword = true;
   bool _rememberMe = false;
+  bool _agreedToAgreements = false;
   bool _isLoading = false;
   String? _inlineAuthError;
 
@@ -191,7 +193,7 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
     if (server == null) return;
 
     final fallbackName = server.label.trim().isEmpty
-        ? 'Cloudreve'
+        ? '小白云盘'
         : server.label.trim();
     final fallbackDescription = '登录后继续管理你的云端文件。';
     final fallbackLogo = QrLoginService.faviconUrlFromCloudreve(server.baseUrl);
@@ -459,6 +461,10 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
   }
 
   Future<void> _login() async {
+    if (!_agreedToAgreements) {
+      ToastHelper.failure('请先阅读并勾选同意用户协议和隐私协议');
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
 
     final captcha = CaptchaService.instance;
@@ -608,6 +614,10 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
   Future<void> _startQrLogin() async {
     if (!BrandConfig.qrLoginEnabled) {
       _qrPollTimer?.cancel();
+      return;
+    }
+    if (!_agreedToAgreements) {
+      ToastHelper.failure('请先阅读并勾选同意用户协议和隐私协议');
       return;
     }
     final server = ServerService.instance.currentServer;
@@ -864,7 +874,7 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
         _siteName ??
         (server?.label.trim().isNotEmpty == true
             ? server!.label.trim()
-            : 'Cloudreve');
+            : '小白云盘');
     final siteDescription = _siteDescription ?? '登录后继续管理你的云端文件。';
 
     return LayoutBuilder(
@@ -1286,6 +1296,13 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
           icon: const Icon(LucideIcons.refreshCw, size: 18),
           label: Text(session == null ? '生成二维码' : '重新生成二维码'),
         ),
+        SizedBox(height: _gap(10, scale, min: 4)),
+        AgreementCheckbox(
+          value: _agreedToAgreements,
+          onChanged: (v) => setState(() => _agreedToAgreements = v),
+          tosUrl: _loginConfig.tosUrl,
+          privacyPolicyUrl: _loginConfig.privacyPolicyUrl,
+        ),
         SizedBox(height: _gap(12, scale, min: 6)),
         OutlinedButton.icon(
           onPressed: () => _switchLoginMode(_LoginMode.password),
@@ -1461,6 +1478,13 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
                 const Text('记住我'),
               ],
             ),
+          ),
+          SizedBox(height: _gap(14, scale, min: 6)),
+          AgreementCheckbox(
+            value: _agreedToAgreements,
+            onChanged: (v) => setState(() => _agreedToAgreements = v),
+            tosUrl: _loginConfig.tosUrl,
+            privacyPolicyUrl: _loginConfig.privacyPolicyUrl,
           ),
           SizedBox(height: _gap(14, scale, min: 6)),
           Row(
@@ -1718,6 +1742,13 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
             captcha.buildCaptchaInput(context),
           ],
           SizedBox(height: _gap(16, scale, min: 8)),
+          AgreementCheckbox(
+            value: _agreedToAgreements,
+            onChanged: (v) => setState(() => _agreedToAgreements = v),
+            tosUrl: _loginConfig.tosUrl,
+            privacyPolicyUrl: _loginConfig.privacyPolicyUrl,
+          ),
+          SizedBox(height: _gap(16, scale, min: 8)),
           FilledButton(
             onPressed: _isLoading ? null : _registerInline,
             style: FilledButton.styleFrom(
@@ -1790,6 +1821,10 @@ class _LoginDesktopPageState extends State<LoginDesktopPage>
   }
 
   Future<void> _registerInline() async {
+    if (!_agreedToAgreements) {
+      setState(() => _inlineAuthError = '请先阅读并勾选同意用户协议和隐私协议');
+      return;
+    }
     if (!_registerFormKey.currentState!.validate()) return;
 
     if (_registerPasswordController.text !=

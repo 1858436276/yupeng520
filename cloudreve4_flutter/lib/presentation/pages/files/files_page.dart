@@ -374,7 +374,7 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
                 ),
                 ListTile(
                   leading: const Icon(Icons.web_asset),
-                  title: const Text('在 Cloudreve 中打开'),
+                  title: const Text('在小白云盘中打开'),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     _openInCloudreveApp(context, singleFile);

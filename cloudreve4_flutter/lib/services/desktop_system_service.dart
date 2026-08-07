@@ -114,7 +114,7 @@ class DesktopSystemService {
           '/t',
           safeDelay.toString(),
           '/c',
-          'Cloudreve 上传任务已完成，电脑将在 $safeDelay 秒后关机。',
+          '小白云盘 上传任务已完成，电脑将在 $safeDelay 秒后关机。',
         ],
         runInShell: false,
       );
@@ -125,7 +125,7 @@ class DesktopSystemService {
       final minutes = safeDelay <= 60 ? '+1' : '+${(safeDelay / 60).ceil()}';
       await Process.start(
         'shutdown',
-        ['-h', minutes, 'Cloudreve upload tasks finished'],
+        ['-h', minutes, '小白云盘 upload tasks finished'],
         runInShell: false,
       );
     }

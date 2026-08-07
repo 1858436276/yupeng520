@@ -235,7 +235,7 @@ class FileAppService {
   }) async {
     final viewer = await findViewerForFile(file);
     if (viewer == null) {
-      throw Exception('没有找到支持 ${FileTypeUtils.getExtension(file.name)} 的 Cloudreve 文件应用');
+      throw Exception('没有找到支持 ${FileTypeUtils.getExtension(file.name)} 的小白云盘文件应用');
     }
 
     try {

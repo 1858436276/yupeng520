@@ -409,10 +409,10 @@ class _DesktopTitleBarState extends State<DesktopTitleBar> {
     if (value.isEmpty) return null;
 
     const suffixes = [
-      ' - Cloudreve',
-      '_Cloudreve',
-      ' · Cloudreve',
-      ' — Cloudreve',
+      ' - 小白云盘',
+      '_小白云盘',
+      ' · 小白云盘',
+      ' — 小白云盘',
     ];
 
     for (final suffix in suffixes) {

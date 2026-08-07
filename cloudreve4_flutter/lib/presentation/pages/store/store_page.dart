@@ -263,7 +263,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
             child: ListTile(
               leading: const Icon(LucideIcons.ticket),
               title: const Text('兑换码'),
-              subtitle: const Text('后续可接入 Cloudreve 兑换码接口'),
+              subtitle: const Text('后续可接入小白云盘兑换码接口'),
               onTap: () => ToastHelper.info('兑换码功能稍后接入'),
             ),
           ),
@@ -626,7 +626,7 @@ class _EmptyStoreCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              '请在 Cloudreve 后台配置存储扩容商品',
+              '请在小白云盘后台配置存储扩容商品',
               style: TextStyle(color: Theme.of(context).hintColor),
             ),
             const SizedBox(height: 14),

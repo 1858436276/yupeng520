@@ -1483,7 +1483,7 @@ class UploadService extends ChangeNotifier {
       callbackPath = '/callback/onedrive/${session.sessionId}/$callbackSecret';
     } else {
       throw Exception(
-        'OneDrive 上传完成，但上传会话缺少 completeURL/callback_secret，无法通知 Cloudreve',
+        'OneDrive 上传完成，但上传会话缺少 completeURL/callback_secret，无法通知小白云盘',
       );
     }
 

@@ -271,7 +271,7 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
     if (!context.mounted) return;
     final auth = context.read<AuthProvider>();
     final userEmail = auth.user?.email ?? 'user';
-    final otpAuthUri = 'otpauth://totp/Cloudreve:$userEmail?secret=$secret&issuer=Cloudreve';
+    final otpAuthUri = 'otpauth://totp/小白云盘:$userEmail?secret=$secret&issuer=小白云盘';
 
     await showDialog(
       context: context,

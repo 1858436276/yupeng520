@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:cloudreve4_flutter/data/models/login_config_model.dart';
+import 'package:cloudreve4_flutter/presentation/widgets/agreement_checkbox.dart';
 import 'package:cloudreve4_flutter/presentation/widgets/desktop_constrained.dart';
 import 'package:cloudreve4_flutter/services/captcha_service.dart';
 import 'package:cloudreve4_flutter/services/qr_login_service.dart';
@@ -48,6 +49,7 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _obscurePassword = true;
   bool _rememberMe = false;
+  bool _agreedToAgreements = false;
   bool _isLoading = false;
 
   LoginConfigModel _loginConfig = const LoginConfigModel();
@@ -144,7 +146,7 @@ class _LoginPageState extends State<LoginPage> {
 
     final loadId = ++_siteBrandLoadId;
     final fallbackName = server.label.trim().isEmpty
-        ? 'Cloudreve'
+        ? '小白云盘'
         : server.label.trim();
 
     // 先取本地缓存：有缓存立即展示，无缓存先走 app_logo，稍后异步拉取
@@ -482,6 +484,10 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _startQrLogin() async {
     if (!_showQrLogin) return;
+    if (!_agreedToAgreements) {
+      ToastHelper.failure('请先阅读并勾选同意用户协议和隐私协议');
+      return;
+    }
     final server = ServerService.instance.currentServer;
     if (server == null) {
       ToastHelper.failure('请先选择服务器');
@@ -629,6 +635,10 @@ class _LoginPageState extends State<LoginPage> {
   // ─── Password Login ────────────────────────────────────────
 
   Future<void> _login() async {
+    if (!_agreedToAgreements) {
+      ToastHelper.failure('请先阅读并勾选同意用户协议和隐私协议');
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
 
     final captcha = CaptchaService.instance;
@@ -765,7 +775,7 @@ class _LoginPageState extends State<LoginPage> {
                     _buildLogo(size: 120),
                     const SizedBox(height: 24),
                     Text(
-                      _siteName ?? 'Cloudreve',
+                      _siteName ?? '小白云盘',
                       style: theme.textTheme.headlineLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -855,6 +865,13 @@ class _LoginPageState extends State<LoginPage> {
               _buildPasswordPanel()
             else
               _buildQrLoginPanel(),
+            const SizedBox(height: 16),
+            AgreementCheckbox(
+              value: _agreedToAgreements,
+              onChanged: (v) => setState(() => _agreedToAgreements = v),
+              tosUrl: _loginConfig.tosUrl,
+              privacyPolicyUrl: _loginConfig.privacyPolicyUrl,
+            ),
           ],
         ),
       ),

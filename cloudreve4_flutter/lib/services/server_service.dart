@@ -23,7 +23,7 @@ class ServerService {
 
   static String get _defaultLabel => BrandConfig.hasFixedServer
       ? BrandConfig.effectiveServerName
-      : 'Cloudreve 官方';
+      : '小白云盘 官方';
   static String get _defaultBaseUrl => BrandConfig.hasFixedServer
       ? BrandConfig.effectiveServerBaseUrl
       : ApiConfig.defaultBaseUrl;

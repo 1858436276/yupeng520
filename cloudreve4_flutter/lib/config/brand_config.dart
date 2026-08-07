@@ -21,7 +21,7 @@ class BrandConfig {
 
   static const String _envAppName = String.fromEnvironment(
     'MKW_APP_NAME',
-    defaultValue: 'Cloudreve',
+    defaultValue: '小白云盘',
   );
 
   static const String _envFixedServerName = String.fromEnvironment(
@@ -55,7 +55,7 @@ class BrandConfig {
     }
 
     final envName = _envAppName.trim();
-    return envName.isNotEmpty ? envName : 'Cloudreve';
+    return envName.isNotEmpty ? envName : '小白云盘';
   }
 
   /// 包名。运行时只用于记录/显示；真正包名由打包阶段修改平台文件。
@@ -94,7 +94,7 @@ class BrandConfig {
     final envName = _envFixedServerName.trim();
     if (envName.isNotEmpty) return envName;
 
-    return appName.trim().isNotEmpty ? appName.trim() : 'Cloudreve';
+    return appName.trim().isNotEmpty ? appName.trim() : '小白云盘';
   }
 
   /// 规范化后的 Cloudreve V4 API 地址，确保末尾为 /api/v4。

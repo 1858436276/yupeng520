@@ -566,6 +566,12 @@ class _AppShellState extends State<AppShell> with GestureHandlerMixin, TickerPro
     final bottomSafePadding = _bottomSystemPadding(context);
     final barHeight = 80.0 + bottomSafePadding;
 
+    // 按屏幕高度自适应图标与文字尺寸，小屏更紧凑
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final isSmallScreen = screenHeight < 700;
+    final iconSize = isSmallScreen ? 22.0 : 24.0;
+    final labelSize = isSmallScreen ? 11.0 : 12.0;
+
     return SizedBox(
       height: barHeight,
       child: GlassmorphismContainer(
@@ -573,77 +579,170 @@ class _AppShellState extends State<AppShell> with GestureHandlerMixin, TickerPro
         child: Padding(
           padding: EdgeInsets.only(bottom: bottomSafePadding),
           child: Consumer2<UploadManagerProvider, DownloadManagerProvider>(
-          builder: (context, uploadManager, downloadManager, _) {
-            final activeCount =
-                uploadManager.activeCount + downloadManager.downloadingCount;
+            builder: (context, uploadManager, downloadManager, _) {
+              final activeCount =
+                  uploadManager.activeCount + downloadManager.downloadingCount;
 
-            return NavigationBar(
-              height: 80,
-            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-            selectedIndex: navProvider.currentIndex,
-            onDestinationSelected: _handleTabSelected,
-            destinations: [
-              const NavigationDestination(
-                icon: Icon(LucideIcons.layoutDashboard),
-                selectedIcon: Icon(LucideIcons.layoutDashboard, weight: 700),
-                label: '概览',
-              ),
-              const NavigationDestination(
-                icon: Icon(LucideIcons.folder),
-                selectedIcon: Icon(LucideIcons.folder, weight: 700),
-                label: '文件',
-              ),
-              NavigationDestination(
-                icon: Badge(
-                  isLabelVisible: activeCount > 0,
-                  label: Text('$activeCount'),
-                  child: const Icon(LucideIcons.listChecks),
+              final tabs = <Widget>[
+                _buildMobileNavItem(
+                  context: context,
+                  selected: navProvider.currentIndex == 0,
+                  label: '概览',
+                  icon: const Icon(LucideIcons.layoutDashboard),
+                  selectedIcon:
+                      const Icon(LucideIcons.layoutDashboard, weight: 700),
+                  iconSize: iconSize,
+                  labelSize: labelSize,
+                  onTap: () => _handleTabSelected(0),
                 ),
-                selectedIcon: Badge(
-                  isLabelVisible: activeCount > 0,
-                  label: Text('$activeCount'),
-                  child: const Icon(LucideIcons.listChecks, weight: 700),
+                _buildMobileNavItem(
+                  context: context,
+                  selected: navProvider.currentIndex == 1,
+                  label: '文件',
+                  icon: const Icon(LucideIcons.folder),
+                  selectedIcon: const Icon(LucideIcons.folder, weight: 700),
+                  iconSize: iconSize,
+                  labelSize: labelSize,
+                  onTap: () => _handleTabSelected(1),
                 ),
-                label: '任务',
-              ),
-              const NavigationDestination(
-                icon: Icon(Icons.storefront_outlined),
-                selectedIcon: Icon(Icons.storefront),
-                label: '商店',
-              ),
-              if (_cachedShowSyncTab)
-                NavigationDestination(
-                  icon: Consumer<SyncProvider>(
-                    builder: (context, sync, _) {
-                      final count = sync.activeWorkerCount;
-                      return Badge(
-                        isLabelVisible: count > 0,
-                        label: Text('$count'),
-                        child: _buildSyncIcon(isSelected: false, size: 24),
-                      );
-                    },
+                _buildMobileNavItem(
+                  context: context,
+                  selected: navProvider.currentIndex == 2,
+                  label: '任务',
+                  icon: Badge(
+                    isLabelVisible: activeCount > 0,
+                    label: Text('$activeCount'),
+                    child: const Icon(LucideIcons.listChecks),
                   ),
-                  selectedIcon: Consumer<SyncProvider>(
-                    builder: (context, sync, _) {
-                      final count = sync.activeWorkerCount;
-                      return Badge(
-                        isLabelVisible: count > 0,
-                        label: Text('$count'),
-                        child: _buildSyncIcon(isSelected: true, size: 24),
-                      );
-                    },
+                  selectedIcon: Badge(
+                    isLabelVisible: activeCount > 0,
+                    label: Text('$activeCount'),
+                    child: const Icon(LucideIcons.listChecks, weight: 700),
                   ),
-                  label: '同步',
+                  iconSize: iconSize,
+                  labelSize: labelSize,
+                  onTap: () => _handleTabSelected(2),
                 ),
-              const NavigationDestination(
-                icon: Icon(LucideIcons.user),
-                selectedIcon: Icon(LucideIcons.user, weight: 700),
-                label: '我的',
-              ),
-            ],
-          );
-        },
+                _buildMobileNavItem(
+                  context: context,
+                  selected: navProvider.currentIndex == 3,
+                  label: '商店',
+                  icon: const Icon(Icons.storefront_outlined),
+                  selectedIcon: const Icon(Icons.storefront),
+                  iconSize: iconSize,
+                  labelSize: labelSize,
+                  onTap: () => _handleTabSelected(3),
+                ),
+                if (_cachedShowSyncTab)
+                  _buildMobileNavItem(
+                    context: context,
+                    selected: navProvider.currentIndex == 4,
+                    label: '同步',
+                    icon: Consumer<SyncProvider>(
+                      builder: (context, sync, _) {
+                        final count = sync.activeWorkerCount;
+                        return Badge(
+                          isLabelVisible: count > 0,
+                          label: Text('$count'),
+                          child:
+                              _buildSyncIcon(isSelected: false, size: iconSize),
+                        );
+                      },
+                    ),
+                    selectedIcon: Consumer<SyncProvider>(
+                      builder: (context, sync, _) {
+                        final count = sync.activeWorkerCount;
+                        return Badge(
+                          isLabelVisible: count > 0,
+                          label: Text('$count'),
+                          child:
+                              _buildSyncIcon(isSelected: true, size: iconSize),
+                        );
+                      },
+                    ),
+                    iconSize: iconSize,
+                    labelSize: labelSize,
+                    onTap: () => _handleTabSelected(4),
+                  ),
+                _buildMobileNavItem(
+                  context: context,
+                  selected: navProvider.currentIndex ==
+                      _pages(_cachedShowSyncTab).length - 1,
+                  label: '我的',
+                  icon: const Icon(LucideIcons.user),
+                  selectedIcon: const Icon(LucideIcons.user, weight: 700),
+                  iconSize: iconSize,
+                  labelSize: labelSize,
+                  onTap: () =>
+                      _handleTabSelected(_pages(_cachedShowSyncTab).length - 1),
+                ),
+              ];
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: tabs,
+              );
+            },
           ),
+        ),
+      ),
+    );
+  }
+
+  /// 底部导航单项：图标 + 文字垂直居中，间距紧凑，选中态带胶囊背景。
+  Widget _buildMobileNavItem({
+    required BuildContext context,
+    required bool selected,
+    required String label,
+    required Widget icon,
+    required Widget selectedIcon,
+    required double iconSize,
+    required double labelSize,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    final iconColor = selected
+        ? colorScheme.primary
+        : colorScheme.onSurfaceVariant;
+    final labelColor = selected
+        ? colorScheme.primary
+        : colorScheme.onSurfaceVariant;
+
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              decoration: BoxDecoration(
+                color: selected
+                    ? colorScheme.primary.withValues(alpha: 0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: IconTheme(
+                data: IconThemeData(size: iconSize, color: iconColor),
+                child: selected ? selectedIcon : icon,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: labelSize,
+                height: 1.2,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: labelColor,
+              ),
+            ),
+          ],
         ),
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:cloudreve4_flutter/data/models/login_config_model.dart';
+import 'package:cloudreve4_flutter/presentation/widgets/agreement_checkbox.dart';
 import 'package:cloudreve4_flutter/presentation/widgets/desktop_constrained.dart';
 import 'package:cloudreve4_flutter/services/captcha_service.dart';
 import 'package:flutter/material.dart';
@@ -24,6 +25,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final _confirmPasswordController = TextEditingController();
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
+  bool _agreedToAgreements = false;
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -51,6 +53,10 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> _register() async {
+    if (!_agreedToAgreements) {
+      setState(() => _errorMessage = '请先阅读并勾选同意用户协议和隐私协议');
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
 
     if (_passwordController.text != _confirmPasswordController.text) {
@@ -179,6 +185,15 @@ class _RegisterPageState extends State<RegisterPage> {
                           const SizedBox(height: 16),
                           captcha.buildCaptchaInput(context),
                         ],
+                        const SizedBox(height: 16),
+                        AgreementCheckbox(
+                          value: _agreedToAgreements,
+                          onChanged: (v) =>
+                              setState(() => _agreedToAgreements = v),
+                          tosUrl: widget.loginConfig.tosUrl,
+                          privacyPolicyUrl:
+                              widget.loginConfig.privacyPolicyUrl,
+                        ),
                         if (_errorMessage != null) ...[
                           const SizedBox(height: 16),
                           Container(

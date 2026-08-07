@@ -751,7 +751,7 @@ class FileOperationDialogs {
     required bool treeStyle,
   }) async {
     final buffer = StringBuffer();
-    buffer.writeln('Cloudreve 文件目录导出');
+    buffer.writeln('小白云盘 文件目录导出');
     buffer.writeln('导出时间：${DateTime.now().toIso8601String()}');
     buffer.writeln();
 

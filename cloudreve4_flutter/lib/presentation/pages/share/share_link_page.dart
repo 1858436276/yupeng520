@@ -310,9 +310,9 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
         ),
         content: Text(
           isFolder
-              ? '该分享来自其他 Cloudreve 站点，文件夹无法直接转存。\n\n'
+              ? '该分享来自其他小白云盘站点，文件夹无法直接转存。\n\n'
                   '将先把「$name」打包成 zip，再通过「离线下载」由服务器拉取后保存到你的网盘。是否继续？'
-              : '该分享来自其他 Cloudreve 站点，无法直接转存到当前账号。\n\n'
+              : '该分享来自其他小白云盘站点，无法直接转存到当前账号。\n\n'
                   '可以使用「离线下载」由服务器下载该文件，再保存到你的网盘。是否继续？',
         ),
         actions: [

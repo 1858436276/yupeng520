@@ -67,7 +67,7 @@ Future<FileMenuAction?> showFileMenu({
     if (hasOpenInBrowser)
       _FileMenuItem(FileMenuAction.openInBrowser, Icons.open_in_browser, '在浏览器中打开'),
     if (hasOpenInCloudreveApp)
-      _FileMenuItem(FileMenuAction.openInCloudreveApp, Icons.web_asset, '在 Cloudreve 中打开'),
+      _FileMenuItem(FileMenuAction.openInCloudreveApp, Icons.web_asset, '在小白云盘中打开'),
     if (hasRename)
       _FileMenuItem(FileMenuAction.rename, Icons.edit, '重命名'),
     if (hasMove)
