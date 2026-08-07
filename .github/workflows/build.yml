@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: cloudreve4_flutter   # 👈 关键：进入子文件夹执行
+        working-directory: cloudreve4_flutter
 
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +22,25 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Android SDK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y android-sdk
+          echo "ANDROID_HOME=/usr/lib/android-sdk" >> $GITHUB_ENV
+          echo "PATH=$PATH:/usr/lib/android-sdk/platform-tools:/usr/lib/android-sdk/tools/bin" >> $GITHUB_ENV
+
+      - name: Accept Android Licenses
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
