@@ -47,7 +47,7 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
           echo "PATH=$PATH" >> $GITHUB_ENV
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;34.0.0"
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Download and setup NDK
         run: |
@@ -91,7 +91,7 @@ jobs:
 
       - name: Set Android compileSdk 35
         run: |
-          printf 'flutter.compileSdkVersion=35\nflutter.targetSdkVersion=35\nflutter.minSdkVersion=31\n' > android/local.properties
+          printf 'flutter.compileSdkVersion=36\nflutter.targetSdkVersion=36\nflutter.minSdkVersion=31\n' > android/local.properties
           cat android/local.properties
 
       - name: Generate release signing keystore
