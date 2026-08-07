@@ -62,6 +62,12 @@ jobs:
           cd native
           cargo ndk -t armeabi-v7a -t arm64-v8a -t x86_64 -o ../android/app/src/main/jniLibs build --release
 
+      - name: Verify native libraries
+        run: |
+          echo "=== Native libraries ==="
+          ls -la android/app/src/main/jniLibs/ || echo "No jniLibs directory!"
+          find android/app/src/main/jniLibs -name "*.so" 2>/dev/null | head -20 || echo "No .so files found!"
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -70,8 +76,8 @@ jobs:
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      - name: Build APK
-        run: flutter build apk --release
+      - name: Build APK with stacktrace
+        run: flutter build apk --release --stacktrace
 
       - name: Upload APK to Release
         uses: ncipollo/release-action@v1
