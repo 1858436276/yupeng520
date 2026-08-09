@@ -29,6 +29,13 @@ class UploadSessionModel {
   final String? uploadPolicy;
   final String? callbackSecret;
 
+  /// 服务端下发的客户端加密参数。
+  ///
+  /// 当存储策略开启文件加密且未使用中转上传时，Cloudreve 返回
+  /// `encrypt_metadata`，要求客户端使用 AES-256-CTR 在上传前对分片加密。
+  /// 中转上传（relay）时该字段为 null，由服务端负责流式加密。
+  final EncryptMetadataModel? encryptMetadata;
+
   UploadSessionModel({
     required this.sessionId,
     this.uploadId,
@@ -41,6 +48,7 @@ class UploadSessionModel {
     this.mimeType,
     this.uploadPolicy,
     this.callbackSecret,
+    this.encryptMetadata,
   });
 
   factory UploadSessionModel.fromJson(Map<String, dynamic> json) {
@@ -77,6 +85,9 @@ class UploadSessionModel {
           json['upload_policy']?.toString() ?? json['uploadPolicy']?.toString(),
       callbackSecret: json['callback_secret']?.toString() ??
           json['callbackSecret']?.toString(),
+      encryptMetadata: EncryptMetadataModel.fromJson(
+        json['encrypt_metadata'] ?? json['encryptMetadata'],
+      ),
     );
   }
 
@@ -93,6 +104,7 @@ class UploadSessionModel {
       'mime_type': mimeType,
       'upload_policy': uploadPolicy,
       'callback_secret': callbackSecret,
+      'encrypt_metadata': encryptMetadata?.toJson(),
     };
   }
 
@@ -101,6 +113,56 @@ class UploadSessionModel {
 
   /// 是否使用中继上传（上传到 Cloudreve 服务器）
   bool get isRelayUpload => storagePolicy.relay == true || storagePolicy.type == 'local';
+
+  /// 是否需要客户端在上传前进行 AES-256-CTR 加密。
+  ///
+  /// 服务端返回 encrypt_metadata 时才需要加密；中转上传（relay）由服务端
+  /// 流式加密，客户端无需处理，因此该字段恒为 null。
+  bool get requiresClientEncryption =>
+      encryptMetadata != null && !isRelayUpload;
+}
+
+/// 客户端加密参数（对应服务端响应中的 `encrypt_metadata`）。
+class EncryptMetadataModel {
+  /// 加密算法，例如 `aes-256-ctr`。
+  final String? algorithm;
+
+  /// Base64 编码的 32 字节 AES-256 密钥。
+  final String? keyPlainText;
+
+  /// Base64 编码的 16 字节初始化向量。
+  final String? iv;
+
+  EncryptMetadataModel({
+    this.algorithm,
+    this.keyPlainText,
+    this.iv,
+  });
+
+  factory EncryptMetadataModel.fromJson(dynamic json) {
+    if (json == null) return EncryptMetadataModel();
+    final map = json is Map<String, dynamic>
+        ? json
+        : json is Map
+            ? Map<String, dynamic>.from(json)
+            : <String, dynamic>{};
+
+    return EncryptMetadataModel(
+      algorithm: map['algorithm']?.toString() ??
+          map['cipher']?.toString(),
+      keyPlainText: map['key_plain_text']?.toString() ??
+          map['keyPlainText']?.toString(),
+      iv: map['iv']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'algorithm': algorithm,
+      'key_plain_text': keyPlainText,
+      'iv': iv,
+    };
+  }
 }
 
 /// 存储策略模型
@@ -111,12 +173,20 @@ class StoragePolicyModel {
   final int maxSize;
   final bool? relay;
 
+  /// 允许的最大并发分片上传数。
+  final int? chunkConcurrency;
+
+  /// 是否支持流式加密（分片边界无需与 AES 块边界对齐）。
+  final bool? streamingEncryption;
+
   StoragePolicyModel({
     required this.id,
     required this.name,
     required this.type,
     required this.maxSize,
     this.relay,
+    this.chunkConcurrency,
+    this.streamingEncryption,
   });
 
   factory StoragePolicyModel.fromJson(Map<String, dynamic> json) {
@@ -131,6 +201,10 @@ class StoragePolicyModel {
           (json['maxSize'] as num?)?.toInt() ??
           0,
       relay: json['relay'] as bool?,
+      chunkConcurrency: (json['chunk_concurrency'] as num?)?.toInt() ??
+          (json['chunkConcurrency'] as num?)?.toInt(),
+      streamingEncryption: json['streaming_encryption'] as bool? ??
+          json['streamingEncryption'] as bool?,
     );
   }
 
@@ -141,6 +215,8 @@ class StoragePolicyModel {
       'type': type,
       'max_size': maxSize,
       'relay': relay,
+      'chunk_concurrency': chunkConcurrency,
+      'streaming_encryption': streamingEncryption,
     };
   }
 }

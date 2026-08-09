@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:cryptography/cryptography.dart';
 import 'package:dio/dio.dart';
 import '../core/utils/direct_http_client.dart';
 import 'package:flutter/foundation.dart';
@@ -673,6 +674,9 @@ class UploadService extends ChangeNotifier {
             : '${task.targetPath}/${task.fileName}',
         'size': task.fileSize,
         if (task.overwrite) 'entity_type': 'version',
+        // 声明客户端支持的文件加密算法。若存储策略开启了文件加密，
+        // 服务端会返回 encrypt_metadata，客户端需按 AES-256-CTR 加密分片。
+        'encryption_supported': const ['aes-256-ctr'],
       },
     );
 
@@ -920,10 +924,17 @@ class UploadService extends ChangeNotifier {
 
         Map<String, dynamic>? partInfo;
 
+        // 客户端文件加密：在分片数据上传前用 AES-256-CTR 加密。
+        // - 中转上传（relay）由服务端流式加密，requiresClientEncryption 为 false；
+        // - 非中转策略（本地/从机/S3-like/OneDrive 等）收到 encrypt_metadata 时
+        //   必须在上传前加密，否则下载解密会失败。
+        final requiresEncryption = session.requiresClientEncryption;
+
         // Android content:// + OneDrive/SharePoint：直接让 Kotlin 读取 ContentResolver
         // 并使用 Android 原生 HttpURLConnection PUT 到 upload session。
         // 不再把 chunk bytes 经 MethodChannel 传回 Dart，也不再由 Dio 直传。
-        if (task.usesContentUri && session._isOneDriveUpload) {
+        // 注意：开启客户端加密时该路径无法在原生层加密，必须退回 Dart 读取+加密。
+        if (task.usesContentUri && session._isOneDriveUpload && !requiresEncryption) {
           await _uploadOneDriveChunkNative(
             task: task,
             index: i,
@@ -948,8 +959,16 @@ class UploadService extends ChangeNotifier {
             );
           }
 
+          final payload = requiresEncryption
+              ? await _encryptChunkData(
+                  chunkData: chunkData,
+                  fileOffset: start,
+                  metadata: session.encryptMetadata!,
+                )
+              : chunkData;
+
           partInfo = await _uploadChunk(
-            chunkData: chunkData,
+            chunkData: payload,
             index: i,
             start: start,
             endExclusive: endExclusive,
@@ -1037,6 +1056,65 @@ class UploadService extends ChangeNotifier {
 
     await file.setPosition(start);
     return Uint8List.fromList(await file.read(length));
+  }
+
+  /// 使用 AES-256-CTR 加密单个分片。
+  ///
+  /// Cloudreve 服务端下发的 `encrypt_metadata` 提供 `key_plain_text`（Base64
+  /// 编码的 32 字节密钥）与 `iv`（Base64 编码的 16 字节初始化向量）。AES-CTR
+  /// 模式下 IV 作为计数器（大端递增，counterBits=128），分片在文件中的字节
+  /// 偏移通过 [fileOffset] 传入，由底层按 `keyStreamIndex` 计算正确的计数器
+  /// 偏移，因此分片边界无需与 AES 块边界对齐。
+  Future<Uint8List> _encryptChunkData({
+    required Uint8List chunkData,
+    required int fileOffset,
+    required EncryptMetadataModel metadata,
+  }) async {
+    final algorithm = (metadata.algorithm ?? '').toLowerCase();
+    if (algorithm.isNotEmpty && algorithm != 'aes-256-ctr') {
+      throw Exception('不支持的客户端加密算法: $algorithm');
+    }
+
+    final keyPlain = metadata.keyPlainText;
+    final ivBase64 = metadata.iv;
+    if (keyPlain == null || keyPlain.isEmpty || ivBase64 == null || ivBase64.isEmpty) {
+      throw Exception('上传会话缺少加密参数（encrypt_metadata）');
+    }
+
+    Uint8List keyBytes;
+    Uint8List ivBytes;
+    try {
+      keyBytes = base64Decode(keyPlain);
+      ivBytes = base64Decode(ivBase64);
+    } catch (e) {
+      throw Exception('加密参数解析失败: $e');
+    }
+
+    if (keyBytes.length != 32) {
+      throw Exception(
+        '加密密钥长度异常：期望 32 字节，实际 ${keyBytes.length} 字节',
+      );
+    }
+    if (ivBytes.length != 16) {
+      throw Exception(
+        '加密 IV 长度异常：期望 16 字节，实际 ${ivBytes.length} 字节',
+      );
+    }
+
+    final cipher = Cryptography.instance.aesCtr(
+      macAlgorithm: MacAlgorithm.empty,
+      secretKeyLength: 32,
+      counterBits: 128,
+    );
+
+    final secretBox = await cipher.encrypt(
+      chunkData,
+      secretKey: SecretKey(keyBytes),
+      nonce: ivBytes,
+      keyStreamIndex: fileOffset,
+    );
+
+    return Uint8List.fromList(secretBox.cipherText);
   }
 
   /// 根据存储策略上传单个分片。
