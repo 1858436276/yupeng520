@@ -428,6 +428,9 @@ impl ApiClient {
         let mut body = serde_json::json!({
             "uri": uri,
             "size": size,
+            // 声明客户端支持的文件加密算法。若存储策略开启了文件加密，
+            // 服务端会返回 encrypt_metadata，客户端需按 AES-256-CTR 加密分片。
+            "encryption_supported": ["aes-256-ctr"],
         });
         if overwrite {
             body["entity_type"] = serde_json::Value::String("version".to_string());
@@ -472,9 +475,14 @@ impl ApiClient {
 
         let file_name = uri.rsplit('/').next().unwrap_or(uri).to_string();
 
+        let encrypt_metadata = data.get("encrypt_metadata")
+            .and_then(|v| if v.is_null() { None } else { Some(v) })
+            .and_then(|v| serde_json::from_value::<EncryptMetadata>(v.clone()).ok());
+
         tracing::info!(
-            "[{}] 创建上传会话: policy={}, urls={}, chunk_size={}",
+            "[{}] 创建上传会话: policy={}, urls={}, chunk_size={}, encrypt={}",
             file_name, storage_policy_type, upload_urls.len(), chunk_size,
+            encrypt_metadata.is_some(),
         );
 
         Ok(UploadSession {
@@ -484,6 +492,7 @@ impl ApiClient {
             storage_policy_type,
             callback_secret,
             file_name,
+            encrypt_metadata,
         })
     }
 
@@ -495,12 +504,25 @@ impl ApiClient {
         file_size: u64,
         task_id: &str,
     ) -> Result<()> {
+        // 客户端文件加密：分片在文件中的字节偏移为 index * chunk_size。
+        // 仅当服务端返回 encrypt_metadata 时才加密（服务端 ClientSideEncrypted=true，
+        // 会原样存储密文）；relay/本地策略服务端恒不返回，无需处理。
+        let payload: Vec<u8> = if let Some(meta) = &session.encrypt_metadata {
+            let config = crate::encrypt::EncryptionConfig::from_metadata(meta)?;
+            let mut chunk = data.to_vec();
+            let byte_offset = index as u64 * session.chunk_size;
+            config.encrypt_at_offset(&mut chunk, byte_offset);
+            chunk
+        } else {
+            data.to_vec()
+        };
+
         if let Some(url) = session.chunk_upload_url(index as usize) {
             // 远程存储策略：直接上传到外部 URL（OneDrive/S3/OSS 等）
-            self.upload_chunk_to_remote(url, data, index, file_size, session, task_id).await
+            self.upload_chunk_to_remote(url, &payload, index, file_size, session, task_id).await
         } else {
             // 本地存储策略：上传到 Cloudreve 服务端
-            self.upload_chunk_local(&session.session_id, index, data).await
+            self.upload_chunk_local(&session.session_id, index, &payload).await
         }
     }
 

@@ -310,6 +310,22 @@ pub struct UploadSession {
     pub callback_secret: String,
     /// 上传文件名（仅用于日志标识，并发时区分不同文件）
     pub file_name: String,
+    /// 客户端文件加密参数（服务端开启文件加密时返回）。
+    /// 非空时所有分片必须在上传前用 AES-256-CTR 加密。
+    #[serde(default)]
+    pub encrypt_metadata: Option<EncryptMetadata>,
+}
+
+/// 服务端下发的客户端加密参数（对应 `encrypt_metadata` 响应字段）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptMetadata {
+    /// 加密算法，例如 `aes-256-ctr`。部分文档写作 `cipher`，兼容解析。
+    #[serde(default, alias = "cipher")]
+    pub algorithm: String,
+    /// Base64 编码的 32 字节 AES-256 密钥。
+    pub key_plain_text: String,
+    /// Base64 编码的 16 字节初始化向量。
+    pub iv: String,
 }
 
 impl UploadSession {

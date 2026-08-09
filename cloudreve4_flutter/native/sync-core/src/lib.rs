@@ -14,6 +14,7 @@ pub mod sync_engine;
 pub mod file_lock;
 pub mod diff;
 pub mod uploader;
+pub mod encrypt;
 pub mod downloader;
 pub mod worker;
 pub mod event_sink;
