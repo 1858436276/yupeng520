@@ -925,9 +925,11 @@ class UploadService extends ChangeNotifier {
         Map<String, dynamic>? partInfo;
 
         // 客户端文件加密：在分片数据上传前用 AES-256-CTR 加密。
-        // - 中转上传（relay）由服务端流式加密，requiresClientEncryption 为 false；
-        // - 非中转策略（本地/从机/S3-like/OneDrive 等）收到 encrypt_metadata 时
-        //   必须在上传前加密，否则下载解密会失败。
+        // - 服务端返回 encrypt_metadata 时（非中转策略开启加密、或从机模式下
+        //   即使策略 relay=true 也会走 unrelayed 分支要求客户端加密），
+        //   必须在上传前加密，否则服务端按密文存储、下载解密会乱码。
+        // - 中转上传（relay）由服务端流式加密，服务端恒不返回 encrypt_metadata，
+        //   requiresClientEncryption 为 false。
         final requiresEncryption = session.requiresClientEncryption;
 
         // Android content:// + OneDrive/SharePoint：直接让 Kotlin 读取 ContentResolver

@@ -116,10 +116,13 @@ class UploadSessionModel {
 
   /// 是否需要客户端在上传前进行 AES-256-CTR 加密。
   ///
-  /// 服务端返回 encrypt_metadata 时才需要加密；中转上传（relay）由服务端
-  /// 流式加密，客户端无需处理，因此该字段恒为 null。
-  bool get requiresClientEncryption =>
-      encryptMetadata != null && !isRelayUpload;
+  /// 判定依据仅看服务端是否返回了 `encrypt_metadata`：
+  /// - 中转上传（relay）时服务端恒返回 null（此时 `ClientSideEncrypted=false`，
+  ///   由服务端流式加密），因此不需要再叠加 `isRelayUpload` 判断；
+  /// - 从机（stateless）模式下即使策略 relay=true，服务端也会走 unrelayed
+  ///   分支返回 encrypt_metadata 并要求客户端加密，叠加 `isRelayUpload` 会误伤，
+  ///   导致明文上传后服务端按密文解密失败。
+  bool get requiresClientEncryption => encryptMetadata != null;
 }
 
 /// 客户端加密参数（对应服务端响应中的 `encrypt_metadata`）。
@@ -139,8 +142,10 @@ class EncryptMetadataModel {
     this.iv,
   });
 
-  factory EncryptMetadataModel.fromJson(dynamic json) {
-    if (json == null) return EncryptMetadataModel();
+  factory EncryptMetadataModel? fromJson(dynamic json) {
+    // 服务端未返回 encrypt_metadata（中转上传或策略未开启加密）时必须返回 null，
+    // 否则空对象会让 requiresClientEncryption 误判为需要客户端加密。
+    if (json == null) return null;
     final map = json is Map<String, dynamic>
         ? json
         : json is Map
