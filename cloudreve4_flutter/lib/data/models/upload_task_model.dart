@@ -142,7 +142,7 @@ class EncryptMetadataModel {
     this.iv,
   });
 
-  factory EncryptMetadataModel? fromJson(dynamic json) {
+  static EncryptMetadataModel? fromJson(dynamic json) {
     // 服务端未返回 encrypt_metadata（中转上传或策略未开启加密）时必须返回 null，
     // 否则空对象会让 requiresClientEncryption 误判为需要客户端加密。
     if (json == null) return null;
