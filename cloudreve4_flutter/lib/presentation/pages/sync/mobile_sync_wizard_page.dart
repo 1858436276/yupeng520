@@ -1,4 +1,5 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -30,6 +31,7 @@ class _MobileSyncWizardPageState extends State<MobileSyncWizardPage> {
   int _step = 0;
   String _syncMode = SyncDefaults.defaultAndroidSyncMode;
   String _localRoot = '';
+  String _defaultLocalRoot = '';
   String _remoteRoot = SyncDefaults.defaultAndroidRemoteRoot;
   final int _maxConcurrent = SyncDefaults.defaultMaxConcurrentTransfers;
   bool _isFinishing = false;
@@ -52,6 +54,7 @@ class _MobileSyncWizardPageState extends State<MobileSyncWizardPage> {
     final localRoot = await SyncDefaults.getDefaultAndroidLocalRoot();
     if (!mounted) return;
     setState(() {
+      _defaultLocalRoot = localRoot;
       _localRoot = localRoot;
       _remoteRoot = SyncDefaults.defaultAndroidRemoteRoot;
     });
@@ -117,7 +120,24 @@ class _MobileSyncWizardPageState extends State<MobileSyncWizardPage> {
     });
   }
 
+  Future<void> _pickLocalFolder() async {
+    final result = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: '选择本地同步目录',
+    );
+    if (result == null || result.isEmpty) return;
+
+    setState(() {
+      _localRoot = result;
+    });
+  }
+
   Future<bool> _ensurePermissions() async {
+    // 用户选择了自定义本地目录（非默认相册目录）时，需要所有文件管理权限。
+    final isCustomDir = _defaultLocalRoot.isNotEmpty && _localRoot != _defaultLocalRoot;
+    if (isCustomDir) {
+      return _ensureAllFilesPermission();
+    }
+
     if (_syncMode == 'album_upload') {
       return _ensureAlbumUploadPermission();
     }
@@ -127,6 +147,20 @@ class _MobileSyncWizardPageState extends State<MobileSyncWizardPage> {
     }
 
     return true;
+  }
+
+  Future<bool> _ensureAllFilesPermission() async {
+    final manageStatus = await Permission.manageExternalStorage.request();
+    if (_isPermissionGranted(manageStatus)) {
+      return true;
+    }
+
+    if (!mounted) return false;
+    return _showPermissionDialog(
+      title: '需要所有文件管理权限',
+      message:
+          '你选择了自定义同步目录，需要所有文件管理权限才能读写该目录。请先在系统权限弹窗中允许访问；如果刚才拒绝了，请到系统设置中开启所有文件管理权限。',
+    );
   }
 
   Future<bool> _ensureAlbumUploadPermission() async {
@@ -365,6 +399,10 @@ class _MobileSyncWizardPageState extends State<MobileSyncWizardPage> {
           icon: Icons.phone_android_outlined,
           title: '手机本地目录',
           path: _localRoot.isEmpty ? '正在获取 DCIM/Camera...' : _localRoot,
+          action: TextButton(
+            onPressed: _pickLocalFolder,
+            child: const Text('更改'),
+          ),
         ),
         const SizedBox(height: 12),
         _PathTile(
