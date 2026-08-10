@@ -25,7 +25,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadStore();
   }
 
@@ -79,6 +79,10 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
               text: '存储扩容',
             ),
             Tab(
+              icon: Icon(LucideIcons.crown, size: 18),
+              text: '会员组',
+            ),
+            Tab(
               icon: Icon(LucideIcons.moreHorizontal, size: 18),
               text: '更多',
             ),
@@ -103,6 +107,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                       controller: _tabController,
                       children: [
                         _buildStorageProducts(config),
+                        _buildGroupProducts(config),
                         _buildMore(config),
                       ],
                     ),
@@ -175,6 +180,90 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGroupProducts(StoreConfig config) {
+    final products = config.groupProducts;
+
+    return RefreshIndicator(
+      onRefresh: _loadStore,
+      child: ListView(
+        cacheExtent: 800,
+        padding: const EdgeInsets.all(16),
+        children: [
+          _buildGroupHeader(config),
+          const SizedBox(height: 20),
+          Text(
+            '会员组商品',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
+          const SizedBox(height: 12),
+          if (products.isEmpty)
+            _EmptyGroupCard(onRefresh: _loadStore)
+          else
+            ...products.map(
+              (product) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _GroupProductCard(
+                  product: product,
+                  payment: config.payment,
+                  pointEnabled: config.pointEnabled,
+                  onTap: _isBuying ? null : () => _confirmGroupPurchase(product, config),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGroupHeader(StoreConfig config) {
+    final theme = Theme.of(context);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                LucideIcons.crown,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '会员组',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '购买后立即升级为对应会员组，享受更多权益',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.hintColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -414,6 +503,265 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
       }
     }
   }
+
+  Future<void> _confirmGroupPurchase(GroupProduct product, StoreConfig config) async {
+    StorePaymentProvider? selectedProvider =
+        config.payment.providers.isNotEmpty ? config.payment.providers.first : null;
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            final providers = config.payment.providers;
+
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '确认购买',
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    _GroupPurchaseSummary(product: product, payment: config.payment),
+                    if (providers.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        '支付方式',
+                        style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                      const SizedBox(height: 8),
+                      RadioGroup<StorePaymentProvider>(
+                        groupValue: selectedProvider,
+                        onChanged: (value) => setSheetState(() {
+                          selectedProvider = value;
+                        }),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: providers.map(
+                            (provider) => RadioListTile<StorePaymentProvider>(
+                              value: provider,
+                              title: Text(provider.name),
+                              subtitle: Text(provider.type),
+                            ),
+                          ).toList(),
+                        ),
+                      ),
+                    ] else ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        config.pointEnabled
+                            ? '当前没有第三方支付方式，将尝试使用积分/站内余额购买。'
+                            : '当前没有第三方支付方式。免费商品可直接领取；付费商品需要站点配置支付方式。',
+                        style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(ctx).hintColor,
+                            ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.of(ctx).pop(false),
+                            child: const Text('取消'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: FilledButton(
+                            onPressed: () => Navigator.of(ctx).pop(true),
+                            child: Text(product.price == 0 ? '领取' : '购买'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      await _purchaseGroup(product, config, selectedProvider);
+    }
+  }
+
+  Future<void> _purchaseGroup(
+    GroupProduct product,
+    StoreConfig config,
+    StorePaymentProvider? provider,
+  ) async {
+    final auth = context.read<AuthProvider>();
+
+    setState(() => _isBuying = true);
+    try {
+      final result = await StoreService.instance.createGroupPayment(
+        product: product,
+        quantity: 1,
+        provider: provider,
+        email: auth.user?.email,
+      );
+
+      if (!mounted) return;
+
+      final url = result.paymentUrl;
+      if (result.paymentNeeded && url != null && url.isNotEmpty) {
+        final uri = Uri.parse(url);
+        final launched = await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
+        );
+        if (!launched && mounted) {
+          ToastHelper.failure('无法打开支付页面');
+        } else if (mounted) {
+          ToastHelper.info('请在支付页面完成付款');
+        }
+      } else {
+        ToastHelper.success('购买成功');
+        await context.read<UserSettingProvider>().loadCapacity();
+        await _loadStore();
+      }
+    } catch (e) {
+      if (mounted) {
+        ToastHelper.failure('购买失败: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isBuying = false);
+      }
+    }
+  }
+}
+
+class _GroupProductCard extends StatelessWidget {
+  final GroupProduct product;
+  final StorePaymentSetting payment;
+  final bool pointEnabled;
+  final VoidCallback? onTap;
+
+  const _GroupProductCard({
+    required this.product,
+    required this.payment,
+    required this.pointEnabled,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final price = payment.formatPrice(product.price);
+    final points = product.points;
+
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      product.name,
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  if (product.chip != null && product.chip!.isNotEmpty)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        product.chip!,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                price,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  color: const Color(0xFFFF9CA8),
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _formatDuration(product.time),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.hintColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (pointEnabled && points != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '$points 积分',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+              if (product.description.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                ...product.description.map(
+                  (item) => Padding(
+                    padding: const EdgeInsets.only(top: 3),
+                    child: Row(
+                      children: [
+                        Icon(
+                          LucideIcons.check,
+                          size: 14,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(child: Text(item)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds <= 0) return '永久';
+    if (seconds < 86400) return '${seconds ~/ 3600 == 0 ? 1 : seconds ~/ 3600} 小时';
+    final days = (seconds / 86400).round();
+    if (days < 30) return '$days 天';
+    if (days < 365) return '${(days / 30).round()} 个月';
+    return '${(days / 365).toStringAsFixed(1)} 年';
+  }
 }
 
 class _StorageProductCard extends StatelessWidget {
@@ -599,6 +947,94 @@ class _PurchaseSummary extends StatelessWidget {
     if (days < 30) return '$days 天';
     if (days < 365) return '${(days / 30).round()} 个月';
     return '${(days / 365).toStringAsFixed(1)} 年';
+  }
+}
+
+class _GroupPurchaseSummary extends StatelessWidget {
+  final GroupProduct product;
+  final StorePaymentSetting payment;
+
+  const _GroupPurchaseSummary({
+    required this.product,
+    required this.payment,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.55),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            const Icon(LucideIcons.crown),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '${product.name} · ${_formatDuration(product.time)}',
+              ),
+            ),
+            Text(
+              payment.formatPrice(product.price),
+              style: const TextStyle(
+                color: Color(0xFFFF9CA8),
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDuration(int seconds) {
+    if (seconds <= 0) return '永久';
+    if (seconds < 86400) return '${seconds ~/ 3600 == 0 ? 1 : seconds ~/ 3600} 小时';
+    final days = (seconds / 86400).round();
+    if (days < 30) return '$days 天';
+    if (days < 365) return '${(days / 30).round()} 个月';
+    return '${(days / 365).toStringAsFixed(1)} 年';
+  }
+}
+
+class _EmptyGroupCard extends StatelessWidget {
+  final Future<void> Function() onRefresh;
+
+  const _EmptyGroupCard({required this.onRefresh});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            Icon(
+              LucideIcons.crown,
+              size: 46,
+              color: Theme.of(context).hintColor,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '暂无会员组商品',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '请在小白云盘后台配置会员组商品',
+              style: TextStyle(color: Theme.of(context).hintColor),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: onRefresh,
+              icon: const Icon(Icons.refresh),
+              label: const Text('刷新'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

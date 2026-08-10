@@ -60,6 +60,39 @@ class StorageProduct {
   }
 }
 
+/// 会员组商品（Cloudreve VAS `group_skus`）。
+class GroupProduct {
+  final String id;
+  final String name;
+  final int time;
+  final int price;
+  final int? points;
+  final String? chip;
+  final List<String> description;
+
+  const GroupProduct({
+    required this.id,
+    required this.name,
+    required this.time,
+    required this.price,
+    this.points,
+    this.chip,
+    this.description = const [],
+  });
+
+  factory GroupProduct.fromJson(Map<String, dynamic> json) {
+    return GroupProduct(
+      id: json['id']?.toString() ?? '',
+      name: json['name']?.toString() ?? '会员',
+      time: _asInt(json['time']),
+      price: _asInt(json['price']),
+      points: _asNullableInt(json['points']),
+      chip: json['chip']?.toString(),
+      description: _asStringList(json['des'] ?? json['description']),
+    );
+  }
+}
+
 class StorePaymentSetting {
   final String currencyCode;
   final String currencyMark;
@@ -108,6 +141,7 @@ class StoreConfig {
   final bool shopNavEnabled;
   final StorePaymentSetting payment;
   final List<StorageProduct> storageProducts;
+  final List<GroupProduct> groupProducts;
 
   const StoreConfig({
     required this.pointEnabled,
@@ -116,6 +150,7 @@ class StoreConfig {
     required this.shopNavEnabled,
     required this.payment,
     required this.storageProducts,
+    required this.groupProducts,
   });
 
   factory StoreConfig.fromJson(Map<String, dynamic> json) {
@@ -137,6 +172,13 @@ class StoreConfig {
         ]) ??
         storeRoot['storage_products'] ??
         storeRoot['storageProducts'];
+
+    final groupRaw = _findValue(json, const [
+          'group_skus',
+          'groupSkus',
+        ]) ??
+        storeRoot['group_skus'] ??
+        storeRoot['groupSkus'];
 
     final paymentRaw = _findValue(json, const ['payment']) ?? storeRoot['payment'];
 
@@ -165,6 +207,10 @@ class StoreConfig {
       payment: StorePaymentSetting.fromJson(_asMap(paymentRaw)),
       storageProducts: _asMapList(productsRaw)
           .map(StorageProduct.fromJson)
+          .where((e) => e.id.isNotEmpty)
+          .toList(),
+      groupProducts: _asMapList(groupRaw)
+          .map(GroupProduct.fromJson)
           .where((e) => e.id.isNotEmpty)
           .toList(),
     );
@@ -240,13 +286,14 @@ class StoreService {
         'StoreService config endpoint=$endpoint '
         'keys=${raw.keys.toList()} '
         'products=${config.storageProducts.length} '
+        'groups=${config.groupProducts.length} '
         'pointEnabled=${config.pointEnabled} '
         'paymentProviders=${config.payment.providers.length}',
       );
 
       fallback ??= config;
 
-      if (config.storageProducts.isNotEmpty) {
+      if (config.storageProducts.isNotEmpty || config.groupProducts.isNotEmpty) {
         return config;
       }
     }
@@ -263,10 +310,12 @@ class StoreService {
       final config = StoreConfig.fromJson(raw);
       AppLogger.d(
         'StoreService VAS endpoint=$endpoint '
-        'keys=${raw.keys.toList()} products=${config.storageProducts.length}',
+        'keys=${raw.keys.toList()} '
+        'products=${config.storageProducts.length} '
+        'groups=${config.groupProducts.length}',
       );
 
-      if (config.storageProducts.isNotEmpty) {
+      if (config.storageProducts.isNotEmpty || config.groupProducts.isNotEmpty) {
         // VAS 商品接口可能没有 payment/point 字段，合并 basic config 的支付设置。
         final base = fallback;
         if (base != null) {
@@ -277,6 +326,7 @@ class StoreService {
             shopNavEnabled: base.shopNavEnabled,
             payment: base.payment,
             storageProducts: config.storageProducts,
+            groupProducts: config.groupProducts,
           );
         }
         return config;
@@ -296,6 +346,7 @@ class StoreService {
             providers: [],
           ),
           storageProducts: [],
+          groupProducts: [],
         );
   }
 
@@ -347,10 +398,51 @@ class StoreService {
     String? email,
     String language = 'zh-CN',
   }) async {
+    return createPayment(
+      productType: 3,
+      skuId: product.id,
+      quantity: quantity,
+      provider: provider,
+      email: email,
+      language: language,
+    );
+  }
+
+  /// 创建会员组订单。
+  ///
+  /// Cloudreve V4 商品类型：会员组 = 2。
+  Future<PaymentCreateResult> createGroupPayment({
+    required GroupProduct product,
+    required int quantity,
+    StorePaymentProvider? provider,
+    String? email,
+    String language = 'zh-CN',
+  }) async {
+    return createPayment(
+      productType: 2,
+      skuId: product.id,
+      quantity: quantity,
+      provider: provider,
+      email: email,
+      language: language,
+    );
+  }
+
+  /// 创建 VAS 订单。
+  ///
+  /// Cloudreve V4 商品类型：ShareLink=1, Group=2, Storage=3, Points=4。
+  Future<PaymentCreateResult> createPayment({
+    required int productType,
+    required String skuId,
+    required int quantity,
+    StorePaymentProvider? provider,
+    String? email,
+    String language = 'zh-CN',
+  }) async {
     final body = <String, dynamic>{
       'product': {
-        'type': 3,
-        'sku_id': product.id,
+        'type': productType,
+        'sku_id': skuId,
       },
       'quantity': quantity,
       'email': email ?? '',
