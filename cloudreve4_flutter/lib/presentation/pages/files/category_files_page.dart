@@ -237,7 +237,7 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
         pageSize: 100,
         orderBy: _sortOption.field.apiKey,
         orderDirection: _sortOption.direction.apiKey,
-        page: refresh || _useOffsetPagination ? (_useOffsetPagination ? _currentPage + 1 : 0) : null,
+        page: _useOffsetPagination ? _currentPage + 1 : 0,
         nextPageToken: _useOffsetPagination ? null : (refresh ? null : _nextPageToken),
       );
 
