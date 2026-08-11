@@ -34,6 +34,9 @@ class FileManagerProvider extends ChangeNotifier {
   bool _isLoadingMore = false;
   bool _hasMore = true;
   String? _nextPageToken;
+  int _currentPage = 0;
+  int _totalItems = 0;
+  bool _useOffsetPagination = false;
   String? _errorMessage;
   String? _contextHint;
   String? _highlightPath;
@@ -56,6 +59,8 @@ class FileManagerProvider extends ChangeNotifier {
   bool get isLoadingMore => _isLoadingMore;
   bool get hasMore => _hasMore;
   String? get nextPageToken => _nextPageToken;
+  bool get useOffsetPagination => _useOffsetPagination;
+  int get currentPage => _currentPage;
   String? get errorMessage => _errorMessage;
   String? get contextHint => _contextHint;
   bool get hasSelection => _selectedFiles.isNotEmpty;
@@ -71,6 +76,47 @@ class FileManagerProvider extends ChangeNotifier {
         pagination['cursor'];
     final token = raw?.toString().trim();
     return token == null || token.isEmpty ? null : token;
+  }
+
+  /// 解析分页响应，同时兼容 cursor（next_token）与 offset（page/total_items）两种模式。
+  ///
+  /// Cloudreve V4 的 pagination 结构：
+  ///   { "page": 1, "page_size": 50, "total_items": 5664,
+  ///     "next_token": "...", "is_cursor": false }
+  /// 部分服务端（如 OpenList cloudreve_v4 驱动）仅返回
+  ///   { "page": 0, "page_size": 50, "is_cursor": false, "next_token": "" }
+  /// 此时通过 loadedCount 是否凑满 pageSize 判断是否还有更多数据。
+  void _applyPagination(
+    Map<String, dynamic>? pagination, {
+    bool preservePage = false,
+    int loadedCount = 0,
+  }) {
+    final token = _readNextPageToken(pagination);
+    if (pagination == null || pagination.isEmpty) {
+      _nextPageToken = null;
+      _currentPage = 0;
+      _totalItems = 0;
+      _useOffsetPagination = false;
+      _hasMore = false;
+      return;
+    }
+    final rawPage = pagination['page'];
+    final rawTotal = pagination['total_items'];
+    final rawPageSize = pagination['page_size'];
+    if (!preservePage && rawPage != null) {
+      _currentPage = int.tryParse(rawPage.toString()) ?? _currentPage;
+    }
+    if (rawTotal != null) _totalItems = int.tryParse(rawTotal.toString()) ?? _totalItems;
+    final pageSize = rawPageSize != null ? (int.tryParse(rawPageSize.toString()) ?? 0) : 0;
+
+    _nextPageToken = token;
+    _useOffsetPagination = token == null;
+    _hasMore = token != null
+        ? true
+        : (_totalItems > 0 && _files.length < _totalItems) ||
+            (pageSize > 0 &&
+                _totalItems == 0 &&
+                loadedCount >= pageSize);
   }
 
   String _fileIdentity(FileModel file) {
@@ -93,6 +139,9 @@ class FileManagerProvider extends ChangeNotifier {
       _isLoading = true;
       _errorMessage = null;
       _nextPageToken = null;
+      _currentPage = 0;
+      _totalItems = 0;
+      _useOffsetPagination = false;
     });
 
     try {
@@ -110,8 +159,7 @@ class FileManagerProvider extends ChangeNotifier {
         _files = filesData
             .map((f) => FileModel.fromJson(f as Map<String, dynamic>))
             .toList();
-        _nextPageToken = _readNextPageToken(pagination);
-        _hasMore = _nextPageToken != null;
+        _applyPagination(pagination, loadedCount: filesData.length);
         _contextHint = response['context_hint'] as String?;
       });
     } on TimeoutException {
@@ -133,7 +181,7 @@ class FileManagerProvider extends ChangeNotifier {
 
   /// 加载更多文件（分页）
   Future<void> loadMoreFiles({Duration timeout = const Duration(seconds: 5)}) async {
-    if (_isLoadingMore || _nextPageToken == null) return;
+    if (_isLoadingMore || !_hasMore) return;
 
     setState(() {
       _isLoadingMore = true;
@@ -146,7 +194,8 @@ class FileManagerProvider extends ChangeNotifier {
         pageSize: 50,
         orderBy: _sortOption.field.apiKey,
         orderDirection: _sortOption.direction.apiKey,
-        nextPageToken: _nextPageToken,
+        page: _useOffsetPagination ? _currentPage + 1 : null,
+        nextPageToken: _useOffsetPagination ? null : _nextPageToken,
       ).timeout(timeout);
 
       final List<dynamic> filesData = response['files'] as List<dynamic>? ?? [];
@@ -158,8 +207,7 @@ class FileManagerProvider extends ChangeNotifier {
       setState(() {
         final existingKeys = _files.map(_fileIdentity).toSet();
         _files.addAll(newFiles.where((f) => !existingKeys.contains(_fileIdentity(f))));
-        _nextPageToken = _readNextPageToken(pagination);
-        _hasMore = _nextPageToken != null;
+        _applyPagination(pagination, loadedCount: filesData.length);
       });
     } on TimeoutException {
       setState(() {
@@ -606,6 +654,9 @@ class FileManagerProvider extends ChangeNotifier {
       _isLoading = true;
       _errorMessage = null;
       _nextPageToken = null;
+      _currentPage = 0;
+      _totalItems = 0;
+      _useOffsetPagination = false;
     });
 
     try {
@@ -622,8 +673,7 @@ class FileManagerProvider extends ChangeNotifier {
         _files = filesData
             .map((f) => FileModel.fromJson(f as Map<String, dynamic>))
             .toList();
-        _nextPageToken = _readNextPageToken(pagination);
-        _hasMore = _nextPageToken != null;
+        _applyPagination(pagination, loadedCount: filesData.length);
         _contextHint = response['context_hint'] as String?;
       });
     } on TimeoutException {
@@ -675,6 +725,9 @@ class FileManagerProvider extends ChangeNotifier {
       _currentPath = '/';
       _errorMessage = null;
       _nextPageToken = null;
+      _currentPage = 0;
+      _totalItems = 0;
+      _useOffsetPagination = false;
       _hasMore = true;
     });
   }
@@ -740,8 +793,7 @@ class FileManagerProvider extends ChangeNotifier {
       final pagination = response['pagination'] as Map<String, dynamic>?;
       setState(() {
         _files = updatedFiles;
-        _nextPageToken = _readNextPageToken(pagination);
-        _hasMore = _nextPageToken != null;
+        _applyPagination(pagination, preservePage: true, loadedCount: newFiles.length);
         _contextHint = response['context_hint'] as String?;
       });
 

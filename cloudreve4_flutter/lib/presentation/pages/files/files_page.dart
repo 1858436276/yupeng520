@@ -90,7 +90,7 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
   final GlobalKey<SpeedDialFabState> _fabKey = GlobalKey<SpeedDialFabState>();
   final ScrollController _scrollController = ScrollController();
   final ScrollController _breadcrumbController = ScrollController();
-  String? _lastViewportFillToken;
+  Object? _lastViewportFillToken;
 
   // 滑动手势追踪
   Offset? _swipeStartPos;
@@ -201,10 +201,12 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
   }
 
   void _scheduleLoadMoreIfViewportNotFilled(FileManagerProvider fileManager) {
-    final token = fileManager.nextPageToken;
-    if (token == null ||
-        token.isEmpty ||
-        token == _lastViewportFillToken ||
+    // offset 分页模式无 next_token，用 currentPage 作为视口填充去重键。
+    final fillKey = fileManager.useOffsetPagination
+        ? fileManager.currentPage
+        : fileManager.nextPageToken;
+    if (fillKey == null ||
+        fillKey == _lastViewportFillToken ||
         fileManager.isLoading ||
         fileManager.isLoadingMore) {
       return;
@@ -215,14 +217,16 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
       if (!fileManager.hasMore ||
           fileManager.isLoading ||
           fileManager.isLoadingMore ||
-          fileManager.nextPageToken != token) {
+          (fileManager.useOffsetPagination
+              ? fileManager.currentPage != fillKey
+              : fileManager.nextPageToken != fillKey)) {
         return;
       }
 
       final position = _scrollController.position;
       if (position.maxScrollExtent <= 48 ||
           position.pixels >= position.maxScrollExtent - 480) {
-        _lastViewportFillToken = token;
+        _lastViewportFillToken = fillKey;
         fileManager.loadMoreFiles();
       }
     });

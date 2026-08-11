@@ -77,8 +77,12 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
   final List<FileModel> _files = [];
   final Set<String> _selectedFilePaths = <String>{};
   String? _nextPageToken;
+  int _currentPage = 0;
+  int _totalItems = 0;
+  bool _useOffsetPagination = false;
+  bool _hasMoreItems = true;
   String? _contextHint;
-  String? _lastViewportFillToken;
+  Object? _lastViewportFillToken;
   bool _isLoading = true;
   bool _isLoadingMore = false;
   String? _errorMessage;
@@ -114,7 +118,8 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
     super.dispose();
   }
 
-  String? _readNextPageToken(Map<String, dynamic> pagination) {
+  String? _readNextPageToken(Map<String, dynamic>? pagination) {
+    if (pagination == null || pagination.isEmpty) return null;
     final raw = pagination['next_token'] ??
         pagination['next_page_token'] ??
         pagination['nextPageToken'] ??
@@ -122,6 +127,37 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
         pagination['cursor'];
     final token = raw?.toString().trim();
     return token == null || token.isEmpty ? null : token;
+  }
+
+  /// 解析分页响应，同时兼容 cursor（next_token）与 offset（page/total_items）两种模式。
+  void _applyPagination(
+    Map<String, dynamic>? pagination, {
+    bool preservePage = false,
+    int loadedCount = 0,
+  }) {
+    final token = _readNextPageToken(pagination);
+    if (pagination == null || pagination.isEmpty) {
+      _nextPageToken = null;
+      _currentPage = 0;
+      _totalItems = 0;
+      _useOffsetPagination = false;
+      _hasMoreItems = false;
+      return;
+    }
+    final rawPage = pagination['page'];
+    final rawTotal = pagination['total_items'];
+    final rawPageSize = pagination['page_size'];
+    if (!preservePage && rawPage != null) {
+      _currentPage = int.tryParse(rawPage.toString()) ?? _currentPage;
+    }
+    if (rawTotal != null) _totalItems = int.tryParse(rawTotal.toString()) ?? _totalItems;
+    final pageSize = rawPageSize != null ? (int.tryParse(rawPageSize.toString()) ?? 0) : 0;
+
+    _nextPageToken = token;
+    _useOffsetPagination = token == null;
+    _hasMoreItems = token != null ||
+        (_totalItems > 0 && _files.length < _totalItems) ||
+        (pageSize > 0 && _totalItems == 0 && loadedCount >= pageSize);
   }
 
   String _fileIdentity(FileModel file) {
@@ -138,29 +174,35 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
   }
 
   void _scheduleLoadMoreIfViewportNotFilled() {
+    if (!_hasMoreItems || _isLoading || _isLoadingMore) return;
     final token = _nextPageToken;
-    if (token == null ||
+    if (_useOffsetPagination) {
+      if (_currentPage == _lastViewportFillToken) return;
+    } else if (token == null ||
         token.isEmpty ||
-        token == _lastViewportFillToken ||
-        _isLoading ||
-        _isLoadingMore) {
+        token == _lastViewportFillToken) {
       return;
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scrollController.hasClients) return;
-      if (_nextPageToken != token || _isLoading || _isLoadingMore) return;
+      if (!_hasMoreItems || _isLoading || _isLoadingMore) return;
+      if (_useOffsetPagination) {
+        if (_currentPage == _lastViewportFillToken) return;
+      } else if (_nextPageToken != token) {
+        return;
+      }
       final position = _scrollController.position;
       if (position.maxScrollExtent <= 48 ||
           position.pixels >= position.maxScrollExtent - 480) {
-        _lastViewportFillToken = token;
+        _lastViewportFillToken = _useOffsetPagination ? _currentPage : token;
         _loadFiles(refresh: false);
       }
     });
   }
 
   void _onScroll() {
-    if (_nextPageToken == null || _isLoading || _isLoadingMore || !_scrollController.hasClients) return;
+    if (!_hasMoreItems || _isLoading || _isLoadingMore || !_scrollController.hasClients) return;
     final position = _scrollController.position;
     if (position.pixels >= position.maxScrollExtent - 480) {
       _loadFiles(refresh: false);
@@ -174,6 +216,10 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
         _isLoadingMore = false;
         _errorMessage = null;
         _nextPageToken = null;
+        _currentPage = 0;
+        _totalItems = 0;
+        _useOffsetPagination = false;
+        _hasMoreItems = true;
         _contextHint = null;
         _files.clear();
         _selectedFilePaths.clear();
@@ -191,7 +237,8 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
         pageSize: 100,
         orderBy: _sortOption.field.apiKey,
         orderDirection: _sortOption.direction.apiKey,
-        nextPageToken: refresh ? null : _nextPageToken,
+        page: refresh || _useOffsetPagination ? (_useOffsetPagination ? _currentPage + 1 : 0) : null,
+        nextPageToken: _useOffsetPagination ? null : (refresh ? null : _nextPageToken),
       );
 
       final filesData = response['files'] as List<dynamic>? ?? const [];
@@ -213,7 +260,10 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
           _files.addAll(newFiles.where((file) => !existingKeys.contains(_fileIdentity(file))));
         }
 
-        _nextPageToken = _readNextPageToken(pagination);
+        _applyPagination(
+          pagination,
+          loadedCount: newFiles.length,
+        );
         _contextHint = response['context_hint'] as String?;
         _isLoading = false;
         _isLoadingMore = false;
@@ -555,7 +605,7 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
             if (_isLoadingMore) ...[
               const SizedBox(height: 8),
               const Center(child: CircularProgressIndicator()),
-            ] else if (_nextPageToken != null) ...[
+            ] else if (_hasMoreItems) ...[
               const SizedBox(height: 8),
               Center(
                 child: OutlinedButton.icon(
