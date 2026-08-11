@@ -1773,7 +1773,14 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
     } else if (FileTypeUtils.isVideo(file.name)) {
       Navigator.of(context).pushNamed(RouteNames.videoPreview, arguments: file);
     } else if (FileTypeUtils.isAudio(file.name)) {
-      Navigator.of(context).pushNamed(RouteNames.audioPreview, arguments: file);
+      final contextHint = Provider.of<FileManagerProvider>(
+        context,
+        listen: false,
+      ).contextHint;
+      Navigator.of(context).pushNamed(
+        RouteNames.audioPreview,
+        arguments: {'file': file, 'contextHint': contextHint},
+      );
     } else if (FileTypeUtils.isMarkdown(file.name)) {
       TextActionMenu.show(
         context,

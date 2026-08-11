@@ -97,7 +97,10 @@ class FileUtils {
     // 这里为了避免无意义请求，默认不请求 SVG 缩略图。
     if (ext == 'svg') return false;
 
-    return isImageFile(fileName) || isVideoFile(fileName) || isPsdFile(fileName);
+    return isImageFile(fileName) ||
+        isVideoFile(fileName) ||
+        isPsdFile(fileName) ||
+        isAudioFile(fileName);
   }
 
   /// 判断是否为PDF文件

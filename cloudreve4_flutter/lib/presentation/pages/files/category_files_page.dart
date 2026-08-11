@@ -638,7 +638,10 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
     } else if (FileTypeUtils.isVideo(file.name)) {
       Navigator.of(context).pushNamed(RouteNames.videoPreview, arguments: file);
     } else if (FileTypeUtils.isAudio(file.name)) {
-      Navigator.of(context).pushNamed(RouteNames.audioPreview, arguments: file);
+      Navigator.of(context).pushNamed(
+        RouteNames.audioPreview,
+        arguments: {'file': file, 'contextHint': _contextHint},
+      );
     } else if (FileTypeUtils.isMarkdown(file.name)) {
       Navigator.of(context).pushNamed(RouteNames.markdownPreview, arguments: file);
     } else if (FileTypeUtils.isTextCode(file.name)) {

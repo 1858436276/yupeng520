@@ -2,13 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import '../../../data/models/file_model.dart';
 import '../../../services/file_service.dart';
+import '../../widgets/thumbnail_image.dart';
 
 /// 音频预览页面
 class AudioPreviewPage extends StatefulWidget {
   final FileModel file;
   final String? entityId;
+  final String? contextHint;
 
-  const AudioPreviewPage({super.key, required this.file, this.entityId});
+  const AudioPreviewPage({
+    super.key,
+    required this.file,
+    this.entityId,
+    this.contextHint,
+  });
 
   @override
   State<AudioPreviewPage> createState() => _AudioPreviewPageState();
@@ -131,7 +138,12 @@ class _AudioPreviewPageState extends State<AudioPreviewPage> {
       );
     }
 
-    return AudioPlayerWidget(player: player, fileName: widget.file.name);
+    return AudioPlayerWidget(
+      player: player,
+      fileName: widget.file.name,
+      file: widget.file,
+      contextHint: widget.contextHint,
+    );
   }
 }
 
@@ -139,8 +151,16 @@ class _AudioPreviewPageState extends State<AudioPreviewPage> {
 class AudioPlayerWidget extends StatefulWidget {
   final Player player;
   final String fileName;
+  final FileModel file;
+  final String? contextHint;
 
-  const AudioPlayerWidget({super.key, required this.player, required this.fileName});
+  const AudioPlayerWidget({
+    super.key,
+    required this.player,
+    required this.fileName,
+    required this.file,
+    this.contextHint,
+  });
 
   @override
   State<AudioPlayerWidget> createState() => _AudioPlayerWidgetState();
@@ -185,10 +205,22 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                   ),
                 ],
               ),
-              child: const Icon(
-                Icons.music_note,
-                size: 120,
-                color: Colors.white,
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  const Icon(
+                    Icons.music_note,
+                    size: 120,
+                    color: Colors.white,
+                  ),
+                  ThumbnailImage(
+                    file: widget.file,
+                    contextHint: widget.contextHint,
+                    borderRadius: 20,
+                    fit: BoxFit.cover,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 48),

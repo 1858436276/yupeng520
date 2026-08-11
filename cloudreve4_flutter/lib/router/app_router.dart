@@ -202,6 +202,7 @@ class AppRouter {
             builder: (context) => AudioPreviewPage(
               file: args['file'] as FileModel,
               entityId: args['entityId'] as String?,
+              contextHint: args['contextHint'] as String?,
             ),
           );
         }
