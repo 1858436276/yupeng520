@@ -361,9 +361,27 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
     );
   }
 
+  static const _pointsProvider = StorePaymentProvider(
+    id: '',
+    type: 'points',
+    name: '积分支付',
+  );
+
+  List<StorePaymentProvider> _payProviders(StoreConfig config) {
+    return [
+      ...config.payment.providers,
+      if (config.pointEnabled) _pointsProvider,
+    ];
+  }
+
+  StorePaymentProvider? _defaultPayProvider(StoreConfig config) {
+    if (config.payment.providers.isNotEmpty) return config.payment.providers.first;
+    if (config.pointEnabled) return _pointsProvider;
+    return null;
+  }
+
   Future<void> _confirmPurchase(StorageProduct product, StoreConfig config) async {
-    StorePaymentProvider? selectedProvider =
-        config.payment.providers.isNotEmpty ? config.payment.providers.first : null;
+    StorePaymentProvider? selectedProvider = _defaultPayProvider(config);
 
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
@@ -371,7 +389,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            final providers = config.payment.providers;
+            final providers = _payProviders(config);
 
             return SafeArea(
               child: Padding(
@@ -410,7 +428,9 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                               value: provider,
                               // 💡 3. 这里成功去掉了已经废弃的 groupValue 和 onChanged
                               title: Text(provider.name),
-                              subtitle: Text(provider.type),
+                              subtitle: Text(provider.type == 'points'
+                                  ? '使用站内积分购买'
+                                  : provider.type),
                             ),
                           ).toList(), // 记得转成 List
                         ),
@@ -505,8 +525,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
   }
 
   Future<void> _confirmGroupPurchase(GroupProduct product, StoreConfig config) async {
-    StorePaymentProvider? selectedProvider =
-        config.payment.providers.isNotEmpty ? config.payment.providers.first : null;
+    StorePaymentProvider? selectedProvider = _defaultPayProvider(config);
 
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
@@ -514,7 +533,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
-            final providers = config.payment.providers;
+            final providers = _payProviders(config);
 
             return SafeArea(
               child: Padding(
@@ -551,7 +570,9 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                             (provider) => RadioListTile<StorePaymentProvider>(
                               value: provider,
                               title: Text(provider.name),
-                              subtitle: Text(provider.type),
+                              subtitle: Text(provider.type == 'points'
+                                  ? '使用站内积分购买'
+                                  : provider.type),
                             ),
                           ).toList(),
                         ),
