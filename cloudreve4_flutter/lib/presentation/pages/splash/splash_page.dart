@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -224,7 +226,7 @@ class _SplashPageState extends State<SplashPage> {
   }
 }
 
-class _MobileSplashBody extends StatelessWidget {
+class _MobileSplashBody extends StatefulWidget {
   const _MobileSplashBody({
     required this.progress,
     required this.status,
@@ -239,7 +241,34 @@ class _MobileSplashBody extends StatelessWidget {
   final bool hasCustomSplashImage;
   final VoidCallback onRetry;
 
-  bool get _hasError => errorText != null;
+  @override
+  State<_MobileSplashBody> createState() => _MobileSplashBodyState();
+}
+
+class _MobileSplashBodyState extends State<_MobileSplashBody>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entranceController;
+  late final AnimationController _pulseController;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1600),
+    )..forward();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    _pulseController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -248,10 +277,13 @@ class _MobileSplashBody extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          if (hasCustomSplashImage)
+          if (widget.hasCustomSplashImage)
             const _CustomSplashImageLayer()
           else
-            const _DefaultSplashLayer(),
+            _AnimatedDefaultSplashLayer(
+              entrance: _entranceController,
+              pulse: _pulseController,
+            ),
           const _SplashToneOverlay(),
           SafeArea(
             child: Padding(
@@ -259,17 +291,215 @@ class _MobileSplashBody extends StatelessWidget {
               child: Column(
                 children: [
                   const Spacer(),
-                  _BottomStatusPill(
-                    progress: progress,
-                    status: _hasError ? errorText! : status,
-                    hasError: _hasError,
-                    onRetry: onRetry,
+                  FadeTransition(
+                    opacity: CurvedAnimation(
+                      parent: _entranceController,
+                      curve: const Interval(0.62, 1.0, curve: Curves.easeOut),
+                    ),
+                    child: _BottomStatusPill(
+                      progress: widget.progress,
+                      status: widget.errorText != null
+                          ? widget.errorText!
+                          : widget.status,
+                      hasError: widget.errorText != null,
+                      onRetry: widget.onRetry,
+                    ),
                   ),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 默认开屏图层的带动画版本：logo 缩放淡入、标题/副标题依次滑入、
+/// logo 微光脉冲、背景光晕呼吸。
+class _AnimatedDefaultSplashLayer extends StatelessWidget {
+  const _AnimatedDefaultSplashLayer({
+    required this.entrance,
+    required this.pulse,
+  });
+
+  final AnimationController entrance;
+  final AnimationController pulse;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: Listenable.merge([entrance, pulse]),
+      builder: (context, _) {
+        final logoScale = CurvedAnimation(
+          parent: entrance,
+          curve: const Interval(0.0, 0.55, curve: Curves.easeOutBack),
+        ).value;
+        final logoFade = CurvedAnimation(
+          parent: entrance,
+          curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
+        ).value;
+        final titleFade = CurvedAnimation(
+          parent: entrance,
+          curve: const Interval(0.32, 0.66, curve: Curves.easeOut),
+        ).value;
+        final titleSlide = CurvedAnimation(
+          parent: entrance,
+          curve: const Interval(0.32, 0.66, curve: Curves.easeOutCubic),
+        ).value;
+        final subtitleFade = CurvedAnimation(
+          parent: entrance,
+          curve: const Interval(0.46, 0.8, curve: Curves.easeOut),
+        ).value;
+        final subtitleSlide = CurvedAnimation(
+          parent: entrance,
+          curve: const Interval(0.46, 0.8, curve: Curves.easeOutCubic),
+        ).value;
+
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color.lerp(
+                  const Color(0xFF071126),
+                  const Color(0xFF0E2A4F),
+                  _breathing(0.25),
+                )!,
+                const Color(0xFF0E2A4F),
+                Color.lerp(
+                  const Color(0xFF0B6B8C),
+                  const Color(0xFF0E86A8),
+                  _breathing(0.55),
+                )!,
+              ],
+            ),
+          ),
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 36),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _BreathingHalo(pulse: pulse),
+                  Transform.scale(
+                    scale: 0.72 + (0.28 * logoScale),
+                    child: Opacity(
+                      opacity: logoFade,
+                      child: Container(
+                        width: 96,
+                        height: 96,
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(30),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFF1E88E5)
+                                  .withValues(alpha: 0.35 + 0.3 * _breathing(0.6)),
+                              blurRadius: 34 + 16 * _breathing(0.4),
+                              spreadRadius: 1,
+                              offset: const Offset(0, 14),
+                            ),
+                          ],
+                        ),
+                        child: Image.asset(
+                          mkwMobileSplashLogoAsset,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) =>
+                              const Icon(
+                            Icons.cloud_done_rounded,
+                            color: Color(0xFF1E88E5),
+                            size: 48,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  Transform.translate(
+                    offset: Offset(0, 26 * (1 - titleSlide)),
+                    child: Opacity(
+                      opacity: titleFade,
+                      child: Text(
+                        mkwMobileSplashTitle,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 34,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Transform.translate(
+                    offset: Offset(0, 20 * (1 - subtitleSlide)),
+                    child: Opacity(
+                      opacity: subtitleFade,
+                      child: Text(
+                        mkwMobileSplashSubtitle,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.78),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 2.4,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 0~1 之间平滑呼吸的进度，基于 pulse 动画二次波峰，避免突兀跳动。
+  double _breathing(double phase) {
+    final t = (pulse.value + phase) % 1.0;
+    return 0.5 - 0.5 * math.cos(t * 2 * math.pi);
+  }
+}
+
+/// logo 背后的扩散光环，随 pulse 放大并淡出，形成呼吸涟漪效果。
+class _BreathingHalo extends StatelessWidget {
+  const _BreathingHalo({required this.pulse});
+
+  final AnimationController pulse;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 120,
+      height: 120,
+      child: AnimatedBuilder(
+        animation: pulse,
+        builder: (context, _) {
+          final t = (pulse.value * 2.0) % 1.0;
+          return Center(
+            child: Container(
+              width: 120 + 36 * t,
+              height: 120 + 36 * t,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.28 * (1 - t)),
+                  width: 1.6,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -342,8 +572,8 @@ class _DefaultSplashLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
+    return const DecoratedBox(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -352,67 +582,6 @@ class _DefaultSplashLayer extends StatelessWidget {
             Color(0xFF0E2A4F),
             Color(0xFF0B6B8C),
           ],
-        ),
-      ),
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 36),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 96,
-                height: 96,
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.92),
-                  borderRadius: BorderRadius.circular(30),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.18),
-                      blurRadius: 28,
-                      offset: const Offset(0, 14),
-                    ),
-                  ],
-                ),
-                child: Image.asset(
-                  mkwMobileSplashLogoAsset,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => const Icon(
-                    Icons.cloud_done_rounded,
-                    color: Color(0xFF1E88E5),
-                    size: 48,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 22),
-              Text(
-                mkwMobileSplashTitle,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 34,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.4,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                mkwMobileSplashSubtitle,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.78),
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 2.4,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );

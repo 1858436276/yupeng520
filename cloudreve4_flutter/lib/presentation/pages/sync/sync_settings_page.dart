@@ -54,7 +54,9 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
       _syncMode = SyncDefaults.defaultAndroidSyncMode;
       _remoteRoot = SyncDefaults.defaultAndroidRemoteRoot;
       SyncDefaults.getDefaultAndroidLocalRoot().then((path) {
-        if (mounted) setState(() => _localRootController.text = path);
+        if (mounted && _localRootController.text.isEmpty) {
+          setState(() => _localRootController.text = path);
+        }
       });
     }
 
@@ -266,6 +268,12 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
                           ? _localRootController.text
                           : 'DCIM/Camera',
                     ),
+                    trailing: sync.isActive || sync.isPaused
+                        ? null
+                        : const Icon(Icons.chevron_right),
+                    onTap: sync.isActive || sync.isPaused
+                        ? null
+                        : () => _pickLocalFolder(),
                   ),
                   ListTile(
                     leading: const Icon(Icons.cloud_upload_outlined),
@@ -526,18 +534,22 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
       _syncMode = mode;
       _remoteRoot = SyncDefaults.defaultAndroidRemoteRoot;
     });
-    SyncDefaults.getDefaultAndroidLocalRoot().then((path) {
-      if (mounted) setState(() => _localRootController.text = path);
-    });
+    if (_localRootController.text.isEmpty) {
+      SyncDefaults.getDefaultAndroidLocalRoot().then((path) {
+        if (mounted) setState(() => _localRootController.text = path);
+      });
+    }
     _pushConfig();
   }
 
-  /// 当前模式为相册模式时，自动设置写死路径
+  /// 相册模式：仅当本地目录为空时设置默认路径，避免覆盖用户已保存的自定义目录。
   Future<void> _applyAlbumPaths() async {
     if (!Platform.isAndroid) return;
     if (_syncMode == 'album_upload' || _syncMode == 'album_download') {
-      final path = await SyncDefaults.getDefaultAndroidLocalRoot();
-      _localRootController.text = path;
+      if (_localRootController.text.isEmpty) {
+        final path = await SyncDefaults.getDefaultAndroidLocalRoot();
+        _localRootController.text = path;
+      }
       _remoteRoot = SyncDefaults.defaultAndroidRemoteRoot;
     }
   }
@@ -687,8 +699,39 @@ class _SyncSettingsPageState extends State<SyncSettingsPage> {
     final result = await FilePicker.platform.getDirectoryPath(
       dialogTitle: '选择本地同步目录',
     );
-    if (result != null) {
-      setState(() => _localRootController.text = result);
+    if (result == null || result.isEmpty) return;
+
+    setState(() => _localRootController.text = result);
+    _pushConfig();
+
+    // Android 上选择自定义目录（非默认 DCIM/Camera）时需要所有文件管理权限。
+    if (Platform.isAndroid) {
+      final defaultPath = await SyncDefaults.getDefaultAndroidLocalRoot();
+      if (result != defaultPath) {
+        final status = await Permission.manageExternalStorage.request();
+        if (!status.isGranted && mounted) {
+          final shouldOpen = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('需要所有文件管理权限'),
+              content: const Text('你选择了自定义同步目录，需要所有文件管理权限才能读写该目录。请开启后重新尝试。'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('稍后再说'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('去设置'),
+                ),
+              ],
+            ),
+          );
+          if (shouldOpen == true) {
+            await openAppSettings();
+          }
+        }
+      }
     }
   }
 
