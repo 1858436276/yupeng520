@@ -7,7 +7,6 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../../core/exceptions/app_exception.dart';
 import '../../../data/models/share_model.dart';
 import '../../../router/app_router.dart';
 import '../../../services/share_link_service.dart';
@@ -28,6 +27,7 @@ class ShareLinkPage extends StatefulWidget {
 class _ShareLinkPageState extends State<ShareLinkPage> {
   final TextEditingController _passwordController = TextEditingController();
   final List<_Crumb> _crumbs = <_Crumb>[];
+  final ScrollController _folderScrollController = ScrollController();
 
   late ShareContext _context;
   ShareModel? _info;
@@ -39,12 +39,26 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
   bool _loadingFiles = false;
   bool _busyDownload = false;
   bool _busySave = false;
+  bool _busyBatchSave = false;
+
+  // 分页状态：兼容 cursor（next_token）与 offset（page/total_items）两种模式
+  String? _nextPageToken;
+  int _currentPage = 0;
+  int _totalItems = 0;
+  int _pageSize = 100;
+  bool _hasMoreFiles = false;
+  bool _loadingMoreFiles = false;
+
+  // 多选批量转存
+  bool _selecting = false;
+  final Set<String> _selected = <String>{};
 
   @override
   void initState() {
     super.initState();
     _context = ShareLinkService.instance.createContext(widget.candidate);
     _passwordController.text = widget.candidate.password ?? '';
+    _folderScrollController.addListener(_onFolderScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadInfo(password: widget.candidate.password);
     });
@@ -53,6 +67,7 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
   @override
   void dispose() {
     _passwordController.dispose();
+    _folderScrollController.dispose();
     super.dispose();
   }
 
@@ -66,6 +81,13 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
       _files = const [];
       _currentUri = null;
       _crumbs.clear();
+      _nextPageToken = null;
+      _currentPage = 0;
+      _totalItems = 0;
+      _hasMoreFiles = false;
+      _loadingMoreFiles = false;
+      _selecting = false;
+      _selected.clear();
     });
 
     _context = ShareLinkService.instance.createContext(
@@ -163,6 +185,15 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
       _loadingFiles = true;
       _fileError = null;
       _currentUri = uri;
+      _nextPageToken = null;
+      _currentPage = 0;
+      _totalItems = 0;
+      _pageSize = 100;
+      _hasMoreFiles = false;
+      _loadingMoreFiles = false;
+      _files = const [];
+      _selecting = false;
+      _selected.clear();
     });
 
     try {
@@ -173,8 +204,14 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
       if (!mounted) return;
       setState(() {
         _files = result.files;
+        _nextPageToken = result.nextPageToken;
+        _currentPage = result.currentPage;
+        _totalItems = result.totalItems;
+        _pageSize = result.pageSize > 0 ? result.pageSize : 100;
+        _hasMoreFiles = result.hasMore;
         _loadingFiles = false;
       });
+      _scheduleLoadMoreIfViewportNotFilled();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -182,6 +219,77 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
         _loadingFiles = false;
       });
     }
+  }
+
+  /// 继续加载下一页分享目录文件。
+  Future<void> _loadMoreFolderFiles() async {
+    final uri = _currentUri;
+    if (uri == null || _loadingMoreFiles || !_hasMoreFiles || _loadingFiles) {
+      return;
+    }
+    setState(() {
+      _loadingMoreFiles = true;
+      _fileError = null;
+    });
+
+    try {
+      // offset 模式无 next_token：翻页用 page；cursor 模式用 nextPageToken。
+      final result = await ShareLinkService.instance.listSharedFiles(
+        context: _context,
+        uri: uri,
+        page: _nextPageToken == null ? _currentPage + 1 : 0,
+        pageSize: _pageSize,
+        nextPageToken: _nextPageToken,
+      );
+      if (!mounted) return;
+      setState(() {
+        final existingKeys = _files.map(_fileKey).toSet();
+        _files = [..._files, ...result.files.where((f) => !existingKeys.contains(_fileKey(f)))];
+        _nextPageToken = result.nextPageToken;
+        _currentPage = result.currentPage;
+        _totalItems = result.totalItems;
+        if (result.pageSize > 0) _pageSize = result.pageSize;
+        _hasMoreFiles = result.hasMore;
+        _loadingMoreFiles = false;
+      });
+      _scheduleLoadMoreIfViewportNotFilled();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMoreFiles = false;
+      });
+      ToastHelper.failure('加载更多失败：$e');
+    }
+  }
+
+  void _onFolderScroll() {
+    if (!_folderScrollController.hasClients) return;
+    final position = _folderScrollController.position;
+    if (position.pixels >= position.maxScrollExtent - 400) {
+      _loadMoreFolderFiles();
+    }
+  }
+
+  Object? _lastViewportFillToken;
+
+  void _scheduleLoadMoreIfViewportNotFilled() {
+    if (_nextPageToken == null && !_hasMoreFiles) return;
+    final fillKey = _nextPageToken ?? _currentPage;
+    if (fillKey == _lastViewportFillToken || _loadingFiles || _loadingMoreFiles) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_folderScrollController.hasClients) return;
+      if (_loadingFiles || _loadingMoreFiles || !_hasMoreFiles) return;
+      final keyNow = _nextPageToken ?? _currentPage;
+      if (keyNow != fillKey) return;
+      final position = _folderScrollController.position;
+      if (position.maxScrollExtent <= 48 ||
+          position.pixels >= position.maxScrollExtent - 400) {
+        _lastViewportFillToken = fillKey;
+        _loadMoreFolderFiles();
+      }
+    });
   }
 
   Future<void> _refresh() async {
@@ -282,16 +390,116 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
       ToastHelper.success('已转存「$name」到 $destination');
     } catch (e) {
       if (!mounted) return;
-      if (e is ServerException &&
-          e.code == 40081 &&
-          e.message.contains('Not supported action')) {
-        ToastHelper.failure('转存为Pro版本专属功能, 您当前版本不支持, errorcode: $e');
+      if (_isGroupForbidden(e)) {
+        ToastHelper.failure('所在用户组不允许转存，请联系管理员开通');
       } else {
         ToastHelper.failure('转存失败：$e');
       }
     } finally {
       if (mounted) setState(() => _busySave = false);
     }
+  }
+
+  /// 目录级别「转存」：同源直接把当前目录已加载的全部文件/子目录批量转存；
+  /// 异源走打包 + 离线下载。
+  Future<void> _saveFolderContents({
+    required String name,
+    String? candidateUri,
+  }) async {
+    if (!_context.isSameOrigin) {
+      await _confirmCrossOriginAndJump(
+        name: name,
+        candidateUri: candidateUri,
+        isFolder: true,
+      );
+      return;
+    }
+    if (_files.isEmpty) {
+      ToastHelper.warning('当前目录为空，没有可转存的内容');
+      return;
+    }
+    final uris = _files.map(_shareFileUri).toList();
+    await _saveUrisToCloud(uris: uris);
+  }
+
+  /// 批量转存选中的文件/子目录。
+  Future<void> _saveSelectedToCloud() async {
+    if (_selected.isEmpty) return;
+    final uris = _files
+        .where((f) => _selected.contains(_fileKey(f)))
+        .map(_shareFileUri)
+        .toList();
+    if (uris.isEmpty) return;
+    await _saveUrisToCloud(uris: uris);
+  }
+
+  /// 把一组分享 URI 转存到用户选择的目录。
+  Future<void> _saveUrisToCloud({required List<String> uris}) async {
+    if (_busyBatchSave || _busySave) return;
+    final destination = await _pickDestination();
+    if (destination == null || !mounted) return;
+    setState(() => _busyBatchSave = true);
+
+    try {
+      await ShareLinkService.instance.saveSharedFiles(
+        context: _context,
+        uris: uris,
+        destination: destination,
+      );
+      if (!mounted) return;
+      ToastHelper.success('已转存 ${uris.length} 项到 $destination');
+      setState(() {
+        _selected.clear();
+        _selecting = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      if (_isGroupForbidden(e)) {
+        ToastHelper.failure('所在用户组不允许转存，请联系管理员开通');
+      } else {
+        ToastHelper.failure('转存失败：$e');
+      }
+    } finally {
+      if (mounted) setState(() => _busyBatchSave = false);
+    }
+  }
+
+  String _fileKey(ShareLinkFile file) =>
+      file.path.trim().isNotEmpty ? file.path.trim() : file.id;
+
+  String _shareFileUri(ShareLinkFile file) =>
+      file.path.trim().isNotEmpty
+          ? file.path.trim()
+          : _context.buildShareUri(subPath: file.name);
+
+  void _enterSelection() {
+    if (_files.isEmpty) return;
+    setState(() {
+      _selecting = true;
+      _selected.clear();
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selected.clear();
+    });
+  }
+
+  void _toggleSelect(ShareLinkFile file) {
+    final key = _fileKey(file);
+    setState(() {
+      if (!_selected.remove(key)) _selected.add(key);
+    });
+  }
+
+  void _selectAllLoaded() {
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(_files.map(_fileKey));
+    });
   }
 
   /// 异源场景：弹确认对话框 → 拿下载链接 → 跳离线下载页自动弹新建框
@@ -430,23 +638,54 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('文件分享'),
+          title: Text(_selecting ? '已选择 ${_selected.length} 项' : '文件分享'),
           actions: [
-            IconButton(
-              tooltip: '浏览器打开',
-              icon: const Icon(LucideIcons.externalLink),
-              onPressed: _openInBrowser,
-            ),
-            IconButton(
-              tooltip: '刷新',
-              icon: const Icon(Icons.refresh),
-              onPressed: _refresh,
-            ),
+            if (_selecting) ...[
+              TextButton(
+                onPressed: _selectAllLoaded,
+                child: const Text('全选'),
+              ),
+              IconButton(
+                tooltip: '批量转存',
+                icon: _busyBatchSave
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.drive_folder_upload_outlined),
+                onPressed:
+                    _busyBatchSave || _selected.isEmpty ? null : _saveSelectedToCloud,
+              ),
+              IconButton(
+                tooltip: '取消选择',
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelection,
+              ),
+            ] else ...[
+              if (_info?.isFolder == true && _files.isNotEmpty)
+                IconButton(
+                  tooltip: '多选转存',
+                  icon: const Icon(Icons.checklist),
+                  onPressed: _enterSelection,
+                ),
+              IconButton(
+                tooltip: '浏览器打开',
+                icon: const Icon(LucideIcons.externalLink),
+                onPressed: _openInBrowser,
+              ),
+              IconButton(
+                tooltip: '刷新',
+                icon: const Icon(Icons.refresh),
+                onPressed: _refresh,
+              ),
+            ],
           ],
         ),
         body: RefreshIndicator(
           onRefresh: _refresh,
           child: ListView(
+            controller: _folderScrollController,
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
             children: [
@@ -779,12 +1018,16 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
           ],
         ),
         const SizedBox(height: 10),
-        // 目录可整体打包下载
+        // 目录可整体打包下载/批量转存当前目录
         _buildActionButtons(
           name: info.name,
           fileSize: info.size ?? 0,
           archive: true,
           candidateUri: _crumbs.isNotEmpty ? _crumbs.last.uri : null,
+          onSave: () => _saveFolderContents(
+            name: info.name,
+            candidateUri: _crumbs.isNotEmpty ? _crumbs.last.uri : null,
+          ),
         ),
         if (_crumbs.isNotEmpty) ...[
           const SizedBox(height: 12),
@@ -808,12 +1051,16 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
             title: '文件夹为空',
             subtitle: '这个分享目录下没有文件。',
           )
-        else
+        else ...[
           ..._files.map(
             (file) => _ShareFileTile(
               file: file,
-              onTap: file.isFolder ? () => _enterFolder(file) : null,
-              onDownload: file.isFile
+              selectable: _selecting,
+              selected: _selecting && _selected.contains(_fileKey(file)),
+              onTap: _selecting
+                  ? () => _toggleSelect(file)
+                  : (file.isFolder ? () => _enterFolder(file) : null),
+              onDownload: !_selecting && file.isFile
                   ? () => _download(
                         fileName: file.name,
                         fileSize: file.size,
@@ -821,14 +1068,38 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
                       )
                   : null,
               // 转存按钮：同源直接转，异源也显示但点了走异源确认流程
-              onSave: () => _saveToCloud(
-                name: file.name,
-                candidateUri: file.path.isNotEmpty ? file.path : null,
-                isFolder: file.isFolder,
-              ),
+              onSave: !_selecting
+                  ? () => _saveToCloud(
+                        name: file.name,
+                        candidateUri: file.path.isNotEmpty ? file.path : null,
+                        isFolder: file.isFolder,
+                      )
+                  : null,
               showCrossOriginHint: !_context.isSameOrigin,
             ),
           ),
+          if (_loadingMoreFiles)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
+              ),
+            )
+          else if (_hasMoreFiles)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Center(
+                child: TextButton(
+                  onPressed: _loadMoreFolderFiles,
+                  child: const Text('加载更多'),
+                ),
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -838,16 +1109,18 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
     required int fileSize,
     String? candidateUri,
     bool archive = false,
+    VoidCallback? onSave,
   }) {
     final saveBtn = FilledButton.tonalIcon(
-      onPressed: _busySave
+      onPressed: _busySave || _busyBatchSave
           ? null
-          : () => _saveToCloud(
-                name: name,
-                candidateUri: candidateUri,
-                isFolder: archive,
-              ),
-      icon: _busySave
+          : (onSave ??
+              () => _saveToCloud(
+                    name: name,
+                    candidateUri: candidateUri,
+                    isFolder: archive,
+                  )),
+      icon: _busySave || _busyBatchSave
           ? const SizedBox(
               width: 14,
               height: 14,
@@ -993,6 +1266,8 @@ class _ShareFileTile extends StatelessWidget {
   final VoidCallback? onDownload;
   final VoidCallback? onSave;
   final bool showCrossOriginHint;
+  final bool selectable;
+  final bool selected;
 
   const _ShareFileTile({
     required this.file,
@@ -1000,6 +1275,8 @@ class _ShareFileTile extends StatelessWidget {
     this.onDownload,
     this.onSave,
     this.showCrossOriginHint = false,
+    this.selectable = false,
+    this.selected = false,
   });
 
   @override
@@ -1013,22 +1290,27 @@ class _ShareFileTile extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ListTile(
         onTap: onTap,
-        leading: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: file.isFolder
-                ? theme.colorScheme.primaryContainer
-                : theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(13),
-          ),
-          child: Icon(
-            icon,
-            color: file.isFolder
-                ? theme.colorScheme.onPrimaryContainer
-                : theme.colorScheme.primary,
-          ),
-        ),
+        leading: selectable
+            ? Checkbox(
+                value: selected,
+                onChanged: (_) => onTap?.call(),
+              )
+            : Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: file.isFolder
+                      ? theme.colorScheme.primaryContainer
+                      : theme.colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(
+                  icon,
+                  color: file.isFolder
+                      ? theme.colorScheme.onPrimaryContainer
+                      : theme.colorScheme.primary,
+                ),
+              ),
         title: Text(
           file.name,
           maxLines: 2,
@@ -1043,25 +1325,27 @@ class _ShareFileTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        trailing: file.isFolder
-            ? const Icon(Icons.chevron_right)
-            : Wrap(
-                spacing: 2,
-                children: [
-                  if (onSave != null)
-                    IconButton(
-                      tooltip: showCrossOriginHint ? '通过离线下载转存' : '转存',
-                      icon: const Icon(Icons.drive_folder_upload_outlined),
-                      onPressed: onSave,
-                    ),
-                  if (onDownload != null)
-                    IconButton(
-                      tooltip: '下载',
-                      icon: const Icon(LucideIcons.download),
-                      onPressed: onDownload,
-                    ),
-                ],
-              ),
+        trailing: selectable
+            ? const Icon(Icons.check_circle_outline)
+            : file.isFolder
+                ? const Icon(Icons.chevron_right)
+                : Wrap(
+                    spacing: 2,
+                    children: [
+                      if (onSave != null)
+                        IconButton(
+                          tooltip: showCrossOriginHint ? '通过离线下载转存' : '转存',
+                          icon: const Icon(Icons.drive_folder_upload_outlined),
+                          onPressed: onSave,
+                        ),
+                      if (onDownload != null)
+                        IconButton(
+                          tooltip: '下载',
+                          icon: const Icon(LucideIcons.download),
+                          onPressed: onDownload,
+                        ),
+                    ],
+                  ),
       ),
     );
   }

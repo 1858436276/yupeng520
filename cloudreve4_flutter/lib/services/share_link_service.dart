@@ -83,12 +83,18 @@ class ShareLinkFileListResult {
   final String? contextHint;
   final bool hasMore;
   final String? nextPageToken;
+  final int currentPage;
+  final int totalItems;
+  final int pageSize;
 
   const ShareLinkFileListResult({
     required this.files,
     this.contextHint,
     this.hasMore = false,
     this.nextPageToken,
+    this.currentPage = 0,
+    this.totalItems = 0,
+    this.pageSize = 0,
   });
 }
 
@@ -314,17 +320,41 @@ class ShareLinkService {
       context.contextHint = headerContext;
     }
 
+    final files = rawFiles is List
+        ? rawFiles
+            .whereType<Map>()
+            .map((item) =>
+                ShareLinkFile.fromJson(Map<String, dynamic>.from(item)))
+            .toList()
+        : const <ShareLinkFile>[];
+    final nextToken = pagination?['next_token']?.toString().trim();
+    final rawPage = pagination?['page'];
+    final rawTotal = pagination?['total_items'];
+    final rawPageSize = pagination?['page_size'];
+    final page = rawPage is num ? rawPage.toInt() : int.tryParse('$rawPage') ?? 0;
+    final totalItems =
+        rawTotal is num ? rawTotal.toInt() : int.tryParse('$rawTotal') ?? 0;
+    final pageSize = rawPageSize is num
+        ? rawPageSize.toInt()
+        : int.tryParse('$rawPageSize') ?? 0;
+
+    // Cloudreve V4 分页兼容 cursor（next_token）与 offset（page/total_items）两种模式：
+    // 无 next_token 时，若服务端给了 total_items 则按已加载数对比，否则按是否凑满 pageSize 判断。
+    final hasMore = nextToken != null && nextToken.isNotEmpty
+        ? true
+        : (totalItems > 0 && files.length < totalItems) ||
+            (pageSize > 0 && totalItems == 0 && files.length >= pageSize);
+
     return ShareLinkFileListResult(
-      files: rawFiles is List
-          ? rawFiles
-              .whereType<Map>()
-              .map((item) =>
-                  ShareLinkFile.fromJson(Map<String, dynamic>.from(item)))
-              .toList()
-          : const [],
+      files: files,
       contextHint: data['context_hint']?.toString() ?? headerContext,
-      hasMore: pagination?['next_token'] != null,
-      nextPageToken: pagination?['next_token']?.toString(),
+      hasMore: hasMore,
+      nextPageToken: (nextToken != null && nextToken.isNotEmpty)
+          ? nextToken
+          : null,
+      currentPage: page,
+      totalItems: totalItems,
+      pageSize: pageSize,
     );
   }
 

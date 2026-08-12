@@ -1439,7 +1439,7 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
         }
 
         if (fileManager.files.isEmpty) {
-          return EmptyFolderView(currentPath: fileManager.currentPath);
+          return _buildRefreshableEmptyFolder(fileManager);
         }
 
         // Summary panel 已移至 AppBar 中，body 只显示文件列表
@@ -1449,6 +1449,24 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
 
         return _buildGridView(context, fileManager);
       },
+    );
+  }
+
+  /// 空文件夹也可下拉刷新：外层套 RefreshIndicator + 可滚动容器。
+  Widget _buildRefreshableEmptyFolder(FileManagerProvider fileManager) {
+    return RefreshIndicator(
+      onRefresh: () => _onRefresh(fileManager),
+      child: LayoutBuilder(
+        builder: (context, constraints) => ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            SizedBox(
+              height: constraints.maxHeight,
+              child: EmptyFolderView(currentPath: fileManager.currentPath),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2460,7 +2478,7 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
           return _buildErrorView(context, fileManager);
         }
         if (fileManager.files.isEmpty) {
-          return EmptyFolderView(currentPath: fileManager.currentPath);
+          return _buildRefreshableEmptyFolder(fileManager);
         }
         return fileManager.viewType == FileViewType.list
             ? _buildListView(context, fileManager)

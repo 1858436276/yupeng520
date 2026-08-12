@@ -34,6 +34,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadAppVersion();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<UserSettingProvider>().loadAll();
+      // 从服务端刷新用户信息（含用户组），管理端修改用户组后无需重新登录即可生效
+      context.read<AuthProvider>().refreshUser();
     });
   }
 
