@@ -38,6 +38,22 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   // 自管全屏状态
   bool _isFullscreen = false;
 
+  // 双击快进/快退（YouTube/B站风格）
+  double? _doubleTapDx;
+  int _doubleTapSeconds = 0;
+  int _doubleTapFlashSerial = 0;
+  Timer? _doubleTapFlashTimer;
+
+  // 拖动进度条
+  bool _dragSeeking = false;
+  double _dragStartFraction = 0.0;
+  Duration _dragBubblePosition = Duration.zero;
+
+  // 播放/暂停中央闪光提示
+  int _playPauseFlashSerial = 0;
+  bool _lastFlashIsPlaying = true;
+  Timer? _playPauseFlashTimer;
+
   // 键盘焦点
   final FocusNode _focusNode = FocusNode();
 
@@ -62,6 +78,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   void dispose() {
     _hideTimer?.cancel();
     _mouseHoverTimer?.cancel();
+    _doubleTapFlashTimer?.cancel();
+    _playPauseFlashTimer?.cancel();
     _focusNode.dispose();
     if (_isDesktop) {
       windowManager.removeListener(this);
@@ -173,6 +191,92 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     } else {
       _showControls();
     }
+  }
+
+  // ========== 双击快进/快退（大厂风格） ==========
+
+  void _onDoubleTapSeek() {
+    final dx = _doubleTapDx;
+    if (dx == null) return;
+    final width = MediaQuery.of(context).size.width;
+    final forward = dx > width / 2;
+    final delta =
+        forward ? const Duration(seconds: 10) : const Duration(seconds: -10);
+    final pos = player.state.position + delta;
+    final dur = player.state.duration;
+    player.seek(pos < Duration.zero
+        ? Duration.zero
+        : (dur > Duration.zero && pos > dur ? dur : pos));
+    setState(() {
+      _doubleTapSeconds = forward ? 10 : -10;
+      _doubleTapFlashSerial++;
+    });
+    _doubleTapFlashTimer?.cancel();
+    _doubleTapFlashTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted && _doubleTapFlashSerial != 0) {
+        setState(() => _doubleTapFlashSerial = 0);
+      }
+    });
+  }
+
+  // ========== 拖动进度（大厂风格） ==========
+
+  void _onDragSeekStart(DragStartDetails details) {
+    final dur = player.state.duration;
+    if (dur.inMilliseconds <= 0) return;
+    _hideTimer?.cancel();
+    _mouseHoverTimer?.cancel();
+    setState(() {
+      _dragSeeking = true;
+      _dragStartFraction =
+          player.state.position.inMilliseconds / dur.inMilliseconds;
+      _dragBubblePosition = player.state.position;
+      _isSeeking = true;
+      _seekPosition = player.state.position;
+    });
+  }
+
+  void _onDragSeekUpdate(DragUpdateDetails details) {
+    if (!_dragSeeking) return;
+    final dur = player.state.duration;
+    final width = MediaQuery.of(context).size.width;
+    if (dur.inMilliseconds <= 0 || width <= 0) return;
+    final delta = details.primaryDelta ?? 0.0;
+    final target = (_dragStartFraction + delta / width).clamp(0.0, 1.0);
+    final targetPos =
+        Duration(milliseconds: (dur.inMilliseconds * target).round());
+    setState(() {
+      _seekPosition = targetPos;
+      _dragBubblePosition = targetPos;
+    });
+  }
+
+  void _onDragSeekEnd(DragEndDetails details) {
+    if (!_dragSeeking) return;
+    player.seek(_seekPosition);
+    setState(() {
+      _dragSeeking = false;
+      _isSeeking = false;
+    });
+    _startHideTimer();
+    if (_isDesktop) _startMouseHoverTimer();
+  }
+
+  // ========== 播放/暂停闪光 ==========
+
+  void _togglePlayPause() {
+    final willPlay = !player.state.playing;
+    player.playOrPause();
+    setState(() {
+      _lastFlashIsPlaying = willPlay;
+      _playPauseFlashSerial++;
+    });
+    _playPauseFlashTimer?.cancel();
+    _playPauseFlashTimer = Timer(const Duration(milliseconds: 700), () {
+      if (mounted && _playPauseFlashSerial != 0) {
+        setState(() => _playPauseFlashSerial = 0);
+      }
+    });
   }
 
   void _onLongPressStart() {
@@ -343,12 +447,49 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     Widget overlay = GestureDetector(
       behavior: HitTestBehavior.translucent,
       onTap: _toggleControls,
-      onDoubleTap: () => player.playOrPause(),
+      onDoubleTapDown: (details) => _doubleTapDx = details.localPosition.dx,
+      onDoubleTap: _onDoubleTapSeek,
+      onHorizontalDragStart: _onDragSeekStart,
+      onHorizontalDragUpdate: _onDragSeekUpdate,
+      onHorizontalDragEnd: _onDragSeekEnd,
       onLongPressStart: (_) => _onLongPressStart(),
       onLongPressEnd: (_) => _onLongPressEnd(),
       child: Stack(
         fit: StackFit.expand,
         children: [
+          // 双击快进/快退气泡
+          if (_doubleTapFlashSerial != 0)
+            Align(
+              alignment: Alignment(
+                (_doubleTapDx != null &&
+                        _doubleTapDx! > MediaQuery.of(context).size.width / 2)
+                    ? 0.62
+                    : -0.62,
+                0,
+              ),
+              child: _SeekBubble(
+                key: ValueKey(_doubleTapFlashSerial),
+                seconds: _doubleTapSeconds,
+              ),
+            ),
+
+          // 拖动进度气泡
+          if (_dragSeeking)
+            Center(
+              child: _DragSeekBubble(
+                text: _formatDuration(_dragBubblePosition),
+              ),
+            ),
+
+          // 播放/暂停闪光
+          if (_playPauseFlashSerial != 0)
+            Center(
+              child: _PlayPauseFlash(
+                key: ValueKey(_playPauseFlashSerial),
+                isPlaying: _lastFlashIsPlaying,
+              ),
+            ),
+
           // 长按2倍速提示
           if (_isLongPressing)
             Center(
@@ -385,6 +526,63 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               if (!buffering) return const SizedBox.shrink();
               return const Center(
                 child: CircularProgressIndicator(color: Colors.white70),
+              );
+            },
+          ),
+
+          // 播放结束：重播提示（大厂风格）
+          StreamBuilder<bool>(
+            stream: player.stream.completed,
+            builder: (context, snapshot) {
+              final completed = snapshot.data ?? false;
+              if (!completed) return const SizedBox.shrink();
+              return StreamBuilder<Duration>(
+                stream: player.stream.position,
+                builder: (context, posSnapshot) {
+                  final pos = posSnapshot.data ?? Duration.zero;
+                  final dur = player.state.duration;
+                  if (dur.inMilliseconds <= 0 || pos < dur) {
+                    return const SizedBox.shrink();
+                  }
+                  return Center(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () {
+                        player.seek(Duration.zero);
+                        player.play();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 28,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.replay_circle_filled_outlined,
+                              color: Colors.white,
+                              size: 58,
+                            ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              '重播',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -514,7 +712,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             final playing = snapshot.data ?? false;
             return IconButton(
               icon: Icon(playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
-              onPressed: () => player.playOrPause(),
+              onPressed: _togglePlayPause,
             );
           },
         ),
@@ -656,48 +854,89 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
         return StreamBuilder<Duration>(
           stream: player.stream.duration,
           builder: (context, durSnapshot) {
-            final position = posSnapshot.data ?? Duration.zero;
-            final duration = durSnapshot.data ?? Duration.zero;
+            return StreamBuilder<Duration>(
+              stream: player.stream.buffer,
+              builder: (context, bufSnapshot) {
+                final position = posSnapshot.data ?? Duration.zero;
+                final duration = durSnapshot.data ?? Duration.zero;
+                final buffer = bufSnapshot.data ?? Duration.zero;
 
-            final displayPos = _isSeeking ? _seekPosition : position;
-            final value = duration.inMilliseconds > 0
-                ? displayPos.inMilliseconds / duration.inMilliseconds
-                : 0.0;
+                final displayPos = _isSeeking ? _seekPosition : position;
+                final value = duration.inMilliseconds > 0
+                    ? displayPos.inMilliseconds / duration.inMilliseconds
+                    : 0.0;
+                final bufferValue = duration.inMilliseconds > 0
+                    ? (buffer.inMilliseconds / duration.inMilliseconds)
+                        .clamp(0.0, 1.0)
+                    : 0.0;
 
-            return SizedBox(
-              height: 20,
-              child: SliderTheme(
-                data: SliderThemeData(
-                  trackHeight: 2,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                  activeTrackColor: const Color(0xFFE94560),
-                  inactiveTrackColor: Colors.white24,
-                  thumbColor: const Color(0xFFE94560),
-                ),
-                child: Slider(
-                  value: value.clamp(0.0, 1.0),
-                  onChanged: (v) {
-                    _hideTimer?.cancel();
-                    _mouseHoverTimer?.cancel();
-                    setState(() {
-                      _isSeeking = true;
-                      _seekPosition = Duration(
-                        milliseconds: (duration.inMilliseconds * v).round(),
+                return SizedBox(
+                  height: 20,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Slider 默认轨道左右各留 24px 的缩进
+                      const inset = 24.0;
+                      final trackWidth = constraints.maxWidth - inset * 2;
+                      return Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // 缓冲进度（大厂风格：进度条底层白色半透明）
+                          Positioned(
+                            left: inset,
+                            width: trackWidth * bufferValue,
+                            top: (constraints.maxHeight - 2) / 2,
+                            height: 2,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white30,
+                                borderRadius: BorderRadius.circular(1),
+                              ),
+                            ),
+                          ),
+                          SliderTheme(
+                            data: SliderThemeData(
+                              trackHeight: 2,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6,
+                              ),
+                              overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 12,
+                              ),
+                              activeTrackColor: const Color(0xFFE94560),
+                              inactiveTrackColor: Colors.white24,
+                              thumbColor: const Color(0xFFE94560),
+                            ),
+                            child: Slider(
+                              value: value.clamp(0.0, 1.0),
+                              onChanged: (v) {
+                                _hideTimer?.cancel();
+                                _mouseHoverTimer?.cancel();
+                                setState(() {
+                                  _isSeeking = true;
+                                  _seekPosition = Duration(
+                                    milliseconds:
+                                        (duration.inMilliseconds * v).round(),
+                                  );
+                                });
+                              },
+                              onChangeEnd: (v) {
+                                final seekTo = Duration(
+                                  milliseconds:
+                                      (duration.inMilliseconds * v).round(),
+                                );
+                                player.seek(seekTo);
+                                setState(() => _isSeeking = false);
+                                _startHideTimer();
+                                if (_isDesktop) _startMouseHoverTimer();
+                              },
+                            ),
+                          ),
+                        ],
                       );
-                    });
-                  },
-                  onChangeEnd: (v) {
-                    final seekTo = Duration(
-                      milliseconds: (duration.inMilliseconds * v).round(),
-                    );
-                    player.seek(seekTo);
-                    setState(() => _isSeeking = false);
-                    _startHideTimer();
-                    if (_isDesktop) _startMouseHoverTimer();
-                  },
-                ),
-              ),
+                    },
+                  ),
+                );
+              },
             );
           },
         );
@@ -756,6 +995,164 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                 ),
               );
             }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 双击快进/快退气泡（YouTube/B站风格）：缩放 + 渐隐动画。
+class _SeekBubble extends StatefulWidget {
+  final int seconds;
+  const _SeekBubble({super.key, required this.seconds});
+
+  @override
+  State<_SeekBubble> createState() => _SeekBubbleState();
+}
+
+class _SeekBubbleState extends State<_SeekBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 750),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final forward = widget.seconds > 0;
+    final progress = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    );
+    return FadeTransition(
+      opacity: Tween<double>(begin: 1, end: 0).animate(progress),
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.82, end: 1.1).animate(progress),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                forward ? Icons.fast_forward : Icons.fast_rewind,
+                color: Colors.white,
+                size: 22,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${forward ? '+' : '-'}${widget.seconds.abs()}s',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 拖拽进度时的当前时间气泡。
+class _DragSeekBubble extends StatelessWidget {
+  final String text;
+  const _DragSeekBubble({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.schedule, color: Colors.white, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 播放/暂停中央闪光提示（大厂风格）。
+class _PlayPauseFlash extends StatefulWidget {
+  final bool isPlaying;
+  const _PlayPauseFlash({super.key, required this.isPlaying});
+
+  @override
+  State<_PlayPauseFlash> createState() => _PlayPauseFlashState();
+}
+
+class _PlayPauseFlashState extends State<_PlayPauseFlash>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 620),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    );
+    return FadeTransition(
+      opacity: Tween<double>(begin: 1, end: 0).animate(progress),
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.72, end: 1.15).animate(progress),
+        child: Container(
+          width: 78,
+          height: 78,
+          decoration: BoxDecoration(
+            color: Colors.black45,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            widget.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: Colors.white,
+            size: 46,
           ),
         ),
       ),

@@ -331,10 +331,10 @@ class ShareLinkService {
     final rawPage = pagination?['page'];
     final rawTotal = pagination?['total_items'];
     final rawPageSize = pagination?['page_size'];
-    final page = rawPage is num ? rawPage.toInt() : int.tryParse('$rawPage') ?? 0;
+    final pageNo = rawPage is num ? rawPage.toInt() : int.tryParse('$rawPage') ?? 0;
     final totalItems =
         rawTotal is num ? rawTotal.toInt() : int.tryParse('$rawTotal') ?? 0;
-    final pageSize = rawPageSize is num
+    final pageSizeResponse = rawPageSize is num
         ? rawPageSize.toInt()
         : int.tryParse('$rawPageSize') ?? 0;
 
@@ -343,7 +343,9 @@ class ShareLinkService {
     final hasMore = nextToken != null && nextToken.isNotEmpty
         ? true
         : (totalItems > 0 && files.length < totalItems) ||
-            (pageSize > 0 && totalItems == 0 && files.length >= pageSize);
+            (pageSizeResponse > 0 &&
+                totalItems == 0 &&
+                files.length >= pageSizeResponse);
 
     return ShareLinkFileListResult(
       files: files,
@@ -352,9 +354,9 @@ class ShareLinkService {
       nextPageToken: (nextToken != null && nextToken.isNotEmpty)
           ? nextToken
           : null,
-      currentPage: page,
+      currentPage: pageNo,
       totalItems: totalItems,
-      pageSize: pageSize,
+      pageSize: pageSizeResponse,
     );
   }
 
