@@ -38,11 +38,18 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   // 自管全屏状态
   bool _isFullscreen = false;
 
-  // 双击快进/快退（YouTube/B站风格）
-  double? _doubleTapDx;
-  int _doubleTapSeconds = 0;
-  int _doubleTapFlashSerial = 0;
-  Timer? _doubleTapFlashTimer;
+  // 锁屏：锁定时隐藏控制栏并禁用全部手势，单击解锁
+  bool _locked = false;
+
+  // 垂直滑动调亮度/音量（左1/3亮度、右1/3音量）
+  bool _verticalAdjusting = false;
+  _VerticalZone _verticalZone = _VerticalZone.none;
+  double _brightness = 1.0;
+  double _brightnessStart = 1.0;
+  double _volumeStart = 0.0;
+  double _volumeValue = 0.0;
+  bool _showVerticalIndicator = false;
+  Timer? _verticalIndicatorTimer;
 
   // 拖动进度条
   bool _dragSeeking = false;
@@ -78,7 +85,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   void dispose() {
     _hideTimer?.cancel();
     _mouseHoverTimer?.cancel();
-    _doubleTapFlashTimer?.cancel();
+    _verticalIndicatorTimer?.cancel();
     _playPauseFlashTimer?.cancel();
     _focusNode.dispose();
     if (_isDesktop) {
@@ -124,13 +131,11 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       videoFullscreenNotifier.value = true;
       await windowManager.setFullScreen(true);
     } else {
-      await Future.wait([
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky, overlays: []),
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]),
-      ]);
+      // 只切换沉浸模式，方向保持自动旋转（竖屏视频竖屏全屏，横屏视频横屏全屏）
+      await SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.immersiveSticky,
+        overlays: [],
+      );
     }
   }
 
@@ -140,13 +145,10 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       await windowManager.setFullScreen(false);
       videoFullscreenNotifier.value = false;
     } else {
-      await Future.wait([
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: SystemUiOverlay.values),
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.portraitDown,
-        ]),
-      ]);
+      await SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: SystemUiOverlay.values,
+      );
     }
   }
 
@@ -193,30 +195,79 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     }
   }
 
-  // ========== 双击快进/快退（大厂风格） ==========
+  // ========== 锁屏 ==========
 
-  void _onDoubleTapSeek() {
-    final dx = _doubleTapDx;
-    if (dx == null) return;
+  void _onLockToggle() {
+    if (_locked) {
+      _unlock();
+    } else {
+      _hideTimer?.cancel();
+      _mouseHoverTimer?.cancel();
+      setState(() {
+        _locked = true;
+        _controlsVisible = false;
+        _volumeSliderVisible = false;
+      });
+    }
+  }
+
+  void _unlock() {
+    _hideTimer?.cancel();
+    setState(() => _locked = false);
+    _showControls();
+  }
+
+  // ========== 垂直滑动调亮度/音量（左1/3亮度、右1/3音量） ==========
+
+  void _onVerticalDragStart(DragStartDetails details) {
     final width = MediaQuery.of(context).size.width;
-    final forward = dx > width / 2;
-    final delta =
-        forward ? const Duration(seconds: 10) : const Duration(seconds: -10);
-    final pos = player.state.position + delta;
-    final dur = player.state.duration;
-    player.seek(pos < Duration.zero
-        ? Duration.zero
-        : (dur > Duration.zero && pos > dur ? dur : pos));
-    setState(() {
-      _doubleTapSeconds = forward ? 10 : -10;
-      _doubleTapFlashSerial++;
-    });
-    _doubleTapFlashTimer?.cancel();
-    _doubleTapFlashTimer = Timer(const Duration(milliseconds: 900), () {
-      if (mounted && _doubleTapFlashSerial != 0) {
-        setState(() => _doubleTapFlashSerial = 0);
+    final dx = details.localPosition.dx;
+    final zone = dx < width / 3
+        ? _VerticalZone.brightness
+        : dx > width * 2 / 3
+            ? _VerticalZone.volume
+            : _VerticalZone.none;
+    if (zone == _VerticalZone.none) return;
+    _hideTimer?.cancel();
+    _mouseHoverTimer?.cancel();
+    _verticalIndicatorTimer?.cancel();
+    _verticalZone = zone;
+    _verticalAdjusting = true;
+    if (zone == _VerticalZone.brightness) {
+      _brightnessStart = _brightness;
+    } else {
+      _volumeStart = player.state.volume;
+      _volumeValue = _volumeStart;
+    }
+    setState(() => _showVerticalIndicator = true);
+  }
+
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    if (!_verticalAdjusting) return;
+    final height = MediaQuery.of(context).size.height;
+    if (height <= 0) return;
+    // 上滑增大，下滑减小
+    final delta = -(details.primaryDelta ?? 0.0) / height;
+    if (_verticalZone == _VerticalZone.brightness) {
+      _brightness = (_brightnessStart + delta).clamp(0.0, 1.0);
+    } else {
+      _volumeValue =
+          (_volumeStart + delta * 100).clamp(0.0, 100.0);
+      player.setVolume(_volumeValue);
+    }
+    setState(() {});
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    if (!_verticalAdjusting) return;
+    _verticalAdjusting = false;
+    _verticalIndicatorTimer = Timer(const Duration(milliseconds: 800), () {
+      if (mounted && _showVerticalIndicator) {
+        setState(() => _showVerticalIndicator = false);
       }
     });
+    _startHideTimer();
+    if (_isDesktop) _startMouseHoverTimer();
   }
 
   // ========== 拖动进度（大厂风格） ==========
@@ -302,6 +353,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   // ========== 桌面端鼠标悬停 ==========
 
   void _onMouseHover(PointerHoverEvent event) {
+    if (_locked) return;
     if (!_controlsVisible) {
       setState(() => _controlsVisible = true);
     }
@@ -323,6 +375,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
 
   void _onKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return;
+    if (_locked) return;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.space) {
       player.playOrPause();
@@ -446,33 +499,19 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   Widget build(BuildContext context) {
     Widget overlay = GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onTap: _toggleControls,
-      onDoubleTapDown: (details) => _doubleTapDx = details.localPosition.dx,
-      onDoubleTap: _onDoubleTapSeek,
-      onHorizontalDragStart: _onDragSeekStart,
-      onHorizontalDragUpdate: _onDragSeekUpdate,
-      onHorizontalDragEnd: _onDragSeekEnd,
-      onLongPressStart: (_) => _onLongPressStart(),
-      onLongPressEnd: (_) => _onLongPressEnd(),
+      onTap: _locked ? _unlock : _toggleControls,
+      onDoubleTap: _locked ? null : _toggleFullscreen,
+      onVerticalDragStart: _locked ? null : _onVerticalDragStart,
+      onVerticalDragUpdate: _locked ? null : _onVerticalDragUpdate,
+      onVerticalDragEnd: _locked ? null : _onVerticalDragEnd,
+      onHorizontalDragStart: _locked ? null : _onDragSeekStart,
+      onHorizontalDragUpdate: _locked ? null : _onDragSeekUpdate,
+      onHorizontalDragEnd: _locked ? null : _onDragSeekEnd,
+      onLongPressStart: _locked ? null : (_) => _onLongPressStart(),
+      onLongPressEnd: _locked ? null : (_) => _onLongPressEnd(),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // 双击快进/快退气泡
-          if (_doubleTapFlashSerial != 0)
-            Align(
-              alignment: Alignment(
-                (_doubleTapDx != null &&
-                        _doubleTapDx! > MediaQuery.of(context).size.width / 2)
-                    ? 0.62
-                    : -0.62,
-                0,
-              ),
-              child: _SeekBubble(
-                key: ValueKey(_doubleTapFlashSerial),
-                seconds: _doubleTapSeconds,
-              ),
-            ),
-
           // 拖动进度气泡
           if (_dragSeeking)
             Center(
@@ -611,6 +650,57 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               child: IgnorePointer(
                 ignoring: !_controlsVisible,
                 child: _buildShortcutsHint(),
+              ),
+            ),
+
+          // 锁屏提示（单击解锁）
+          if (_locked)
+            Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.lock, color: Colors.white, size: 18),
+                    SizedBox(width: 8),
+                    Text(
+                      '已锁定 · 轻点屏幕解锁',
+                      style: TextStyle(color: Colors.white, fontSize: 14),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // 垂直滑动调亮度/音量指示气泡
+          if (_showVerticalIndicator && !_locked)
+            Center(
+              child: _AdjustIndicator(
+                icon: _verticalZone == _VerticalZone.brightness
+                    ? Icons.brightness_6
+                    : Icons.volume_up,
+                label: _verticalZone == _VerticalZone.brightness
+                    ? '${(_brightness * 100).round()}%'
+                    : '${_volumeValue.round()}%',
+                fraction: _verticalZone == _VerticalZone.brightness
+                    ? _brightness
+                    : _volumeValue / 100,
+              ),
+            ),
+
+          // 亮度蒙层（最上层，不吃手势）
+          if (_brightness < 0.999)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: ColoredBox(
+                  color: Colors.black.withValues(
+                    alpha: ((1 - _brightness) * 0.9).clamp(0.0, 1.0),
+                  ),
+                ),
               ),
             ),
         ],
@@ -759,6 +849,15 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               ),
             );
           },
+        ),
+        // 锁定按钮
+        IconButton(
+          icon: Icon(
+            _locked ? Icons.lock : Icons.lock_open,
+            color: Colors.white,
+            size: 20,
+          ),
+          onPressed: _onLockToggle,
         ),
         // 全屏按钮
         IconButton(
@@ -1002,75 +1101,75 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   }
 }
 
-/// 双击快进/快退气泡（YouTube/B站风格）：缩放 + 渐隐动画。
-class _SeekBubble extends StatefulWidget {
-  final int seconds;
-  const _SeekBubble({super.key, required this.seconds});
+/// 垂直滑动调节（亮度/音量）指示气泡：图标 + 百分比 + 竖向进度条。
+class _AdjustIndicator extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final double fraction;
 
-  @override
-  State<_SeekBubble> createState() => _SeekBubbleState();
-}
-
-class _SeekBubbleState extends State<_SeekBubble>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 750),
-    )..forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  const _AdjustIndicator({
+    required this.icon,
+    required this.label,
+    required this.fraction,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final forward = widget.seconds > 0;
-    final progress = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    );
-    return FadeTransition(
-      opacity: Tween<double>(begin: 1, end: 0).animate(progress),
-      child: ScaleTransition(
-        scale: Tween<double>(begin: 0.82, end: 1.1).animate(progress),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(10),
+    return Container(
+      width: 148,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 26),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                forward ? Icons.fast_forward : Icons.fast_rewind,
-                color: Colors.white,
-                size: 22,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${forward ? '+' : '-'}${widget.seconds.abs()}s',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+          const SizedBox(height: 8),
+          // 竖向进度条（底部填充）
+          SizedBox(
+            height: 64,
+            child: Stack(
+              alignment: Alignment.bottomCenter,
+              children: [
+                Container(
+                  width: 5,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
-              ),
-            ],
+                FractionallySizedBox(
+                  heightFactor: fraction.clamp(0.0, 1.0),
+                  child: Container(
+                    width: 5,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE94560),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 }
+
+/// 垂直滑动分区：左侧亮度、右侧音量、中间不响应。
+enum _VerticalZone { none, brightness, volume }
 
 /// 拖拽进度时的当前时间气泡。
 class _DragSeekBubble extends StatelessWidget {

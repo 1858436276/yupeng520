@@ -66,6 +66,9 @@ dependencies:
   # 文件选择
   file_picker: ^8.0.0
 
+  # 系统分享（图片/文件分享）
+  share_plus: ^10.0.2
+
   # 下载
   background_downloader: 9.5.4
   flutter_foreground_task: ^9.2.2

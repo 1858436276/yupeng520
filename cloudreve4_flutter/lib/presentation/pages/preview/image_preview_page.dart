@@ -1,15 +1,21 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cross_file/cross_file.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:photo_view/photo_view.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../data/models/file_model.dart';
-import '../../../services/file_service.dart';
 import '../../../services/cache_manager_service.dart';
+import '../../../services/file_service.dart';
+import '../../widgets/toast_helper.dart';
 
-/// 图片预览页面（大厂风格：全屏黑底、点击显隐控制栏、双击/滚轮缩放）
+/// 图片预览页面（大厂风格：全屏黑底、单击显隐控制栏、双指缩放、下滑关闭、旋转/保存/分享）
 class ImagePreviewPage extends StatefulWidget {
   final FileModel file;
   final String? entityId;
@@ -31,6 +37,13 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
   late final AnimationController _zoomController;
   late Animation<double> _zoomAnimation;
   bool _showOverlay = true;
+
+  // 旋转（90° 步进）
+  int _quarterTurns = 0;
+
+  // 保存/分享加载态
+  bool _saving = false;
+  bool _sharing = false;
 
   bool get _isDesktop => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
@@ -139,6 +152,92 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
     _animateScaleTo(target);
   }
 
+  // 下滑关闭（仅未缩放时响应）
+  void _onPullDown(DragEndDetails details) {
+    final scale = _photoController.scale ?? 1.0;
+    if (scale > 1.05) return;
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity > 700 || details.primaryDelta! > 160) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _rotate() {
+    setState(() => _quarterTurns = (_quarterTurns + 1) % 4);
+  }
+
+  Future<Uint8List> _downloadBytes() async {
+    final resp = await Dio().get<List<int>>(
+      _imageUrl!,
+      options: Options(responseType: ResponseType.bytes),
+    );
+    final data = resp.data;
+    if (data == null || data.isEmpty) {
+      throw Exception('下载内容为空');
+    }
+    return Uint8List.fromList(data);
+  }
+
+  String _mimeType() {
+    final name = widget.file.name.toLowerCase();
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.gif')) return 'image/gif';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.bmp')) return 'image/bmp';
+    return 'image/jpeg';
+  }
+
+  Future<void> _saveImage() async {
+    if (_saving || _imageUrl == null) return;
+    setState(() => _saving = true);
+    try {
+      final bytes = await _downloadBytes();
+      final dir = await getDownloadsDirectory();
+      if (dir == null) {
+        ToastHelper.failure('无法获取下载目录');
+        return;
+      }
+      var dest = File('${dir.path}${Platform.pathSeparator}${widget.file.name}');
+      var index = 1;
+      while (dest.existsSync()) {
+        final dot = widget.file.name.lastIndexOf('.');
+        final stem =
+            dot > 0 ? widget.file.name.substring(0, dot) : widget.file.name;
+        final ext = dot > 0 ? widget.file.name.substring(dot) : '';
+        dest = File('${dir.path}${Platform.pathSeparator}$stem($index)$ext');
+        index++;
+      }
+      await dest.writeAsBytes(bytes);
+      if (mounted) ToastHelper.success('已保存到下载目录');
+    } catch (e) {
+      if (mounted) ToastHelper.failure('保存失败：$e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _shareImage() async {
+    if (_sharing || _imageUrl == null) return;
+    setState(() => _sharing = true);
+    try {
+      final bytes = await _downloadBytes();
+      final tempDir = await getTemporaryDirectory();
+      final file =
+          File('${tempDir.path}${Platform.pathSeparator}${widget.file.name}');
+      await file.writeAsBytes(bytes);
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: _mimeType())],
+          subject: widget.file.name,
+        ),
+      );
+    } catch (e) {
+      if (mounted) ToastHelper.failure('分享失败：$e');
+    } finally {
+      if (mounted) setState(() => _sharing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -217,23 +316,60 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
       padding: EdgeInsets.only(
         bottom: MediaQuery.of(context).padding.bottom + 10,
         left: 16,
-        right: 16,
+        right: 8,
         top: 16,
       ),
       child: Row(
         children: [
-          Icon(Icons.zoom_in, size: 14, color: Colors.white60),
-          const SizedBox(width: 6),
           const Text(
-            '双击或 Ctrl+滚轮缩放 · 双指捏合缩放',
+            '下滑关闭 · 双击缩放',
             style: TextStyle(color: Colors.white60, fontSize: 12),
           ),
           const Spacer(),
           if (size != null && size > 0)
-            Text(
-              _formatSize(size),
-              style: const TextStyle(color: Colors.white60, fontSize: 12),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                _formatSize(size),
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
             ),
+          // 旋转
+          IconButton(
+            icon: const Icon(Icons.rotate_right, color: Colors.white),
+            tooltip: '旋转',
+            onPressed: _rotate,
+          ),
+          // 保存
+          IconButton(
+            icon: _saving
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.download, color: Colors.white),
+            tooltip: '保存',
+            onPressed: _saving ? null : _saveImage,
+          ),
+          // 分享
+          IconButton(
+            icon: _sharing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.share, color: Colors.white),
+            tooltip: '分享',
+            onPressed: _sharing ? null : _shareImage,
+          ),
         ],
       ),
     );
@@ -278,7 +414,9 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
     }
 
     if (_imageUrl == null) {
-      return const Center(child: Text('无法加载图片', style: TextStyle(color: Colors.white70)));
+      return const Center(
+        child: Text('无法加载图片', style: TextStyle(color: Colors.white70)),
+      );
     }
 
     return Listener(
@@ -289,20 +427,25 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
         behavior: HitTestBehavior.opaque,
         onTap: _toggleOverlay,
         onDoubleTap: _onDoubleTap,
-        child: PhotoView(
-          controller: _photoController,
-          imageProvider: CachedNetworkImageProvider(
-            _imageUrl!,
-            cacheManager: CacheManagerService.instance.manager,
-          ),
-          minScale: PhotoViewComputedScale.contained,
-          maxScale: PhotoViewComputedScale.covered * 3,
-          initialScale: PhotoViewComputedScale.contained,
-          backgroundDecoration: const BoxDecoration(color: Colors.black),
-          loadingBuilder: (context, event) =>
-              const Center(child: CircularProgressIndicator(color: Colors.white70)),
-          errorBuilder: (context, error, stackTrace) => const Center(
-            child: Icon(Icons.error_outline, size: 48, color: Colors.white54),
+        onVerticalDragEnd: _onPullDown,
+        child: RotatedBox(
+          quarterTurns: _quarterTurns,
+          child: PhotoView(
+            controller: _photoController,
+            imageProvider: CachedNetworkImageProvider(
+              _imageUrl!,
+              cacheManager: CacheManagerService.instance.manager,
+            ),
+            minScale: PhotoViewComputedScale.contained,
+            maxScale: PhotoViewComputedScale.covered * 3,
+            initialScale: PhotoViewComputedScale.contained,
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+            loadingBuilder: (context, event) => const Center(
+              child: CircularProgressIndicator(color: Colors.white70),
+            ),
+            errorBuilder: (context, error, stackTrace) => const Center(
+              child: Icon(Icons.error_outline, size: 48, color: Colors.white54),
+            ),
           ),
         ),
       ),
