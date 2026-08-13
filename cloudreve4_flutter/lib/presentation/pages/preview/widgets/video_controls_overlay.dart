@@ -38,12 +38,19 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   // 自管全屏状态
   bool _isFullscreen = false;
 
+  // 方向控制（移动端）：按视频宽高比自动锁定横/竖屏，旋转按钮可手动切换
+  _VideoOrientation _orientation = _VideoOrientation.auto;
+  bool _userOrientationOverride = false;
+  StreamSubscription<VideoParams>? _videoParamsSub;
+
   // 锁屏：锁定时隐藏控制栏并禁用全部手势，单击解锁
   bool _locked = false;
 
   // 垂直滑动调亮度/音量（左1/3亮度、右1/3音量）
   bool _verticalAdjusting = false;
   _VerticalZone _verticalZone = _VerticalZone.none;
+  double _verticalDragStartDy = 0.0;
+  double _verticalDragStartHeight = 1.0;
   double _brightness = 1.0;
   double _brightnessStart = 1.0;
   double _volumeStart = 0.0;
@@ -76,8 +83,14 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     if (_isDesktop) {
       windowManager.addListener(this);
     }
+    _initAutoOrientation();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
+      if (!mounted) return;
+      _focusNode.requestFocus();
+      // 播放视频默认全屏
+      if (!_isFullscreen) {
+        _toggleFullscreen();
+      }
     });
   }
 
@@ -87,14 +100,80 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     _mouseHoverTimer?.cancel();
     _verticalIndicatorTimer?.cancel();
     _playPauseFlashTimer?.cancel();
+    _videoParamsSub?.cancel();
     _focusNode.dispose();
     if (_isDesktop) {
       windowManager.removeListener(this);
     }
     if (_isFullscreen) {
       _doExitFullscreen();
+    } else if (!_isDesktop) {
+      // 未处于全屏也恢复沉浸模式（进全屏时序保护）
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
+          overlays: SystemUiOverlay.values);
+    }
+    if (!_isDesktop) {
+      // 恢复全局竖屏锁定
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
     }
     super.dispose();
+  }
+
+  // ========== 自动横竖屏识别（按视频宽高比） ==========
+
+  void _initAutoOrientation() {
+    if (_isDesktop) return;
+    _videoParamsSub = player.stream.videoParams.listen((params) {
+      if (_userOrientationOverride) return;
+      final w = params.width;
+      final h = params.height;
+      if (w == null || h == null || w <= 0 || h <= 0) return;
+      // 宽 > 高视为横屏视频，否则竖屏视频
+      final next = w > h
+          ? _VideoOrientation.landscape
+          : _VideoOrientation.portrait;
+      if (_orientation != next) {
+        _orientation = next;
+        _applyOrientation();
+      }
+    });
+  }
+
+  Future<void> _applyOrientation() async {
+    if (_isDesktop) return;
+    switch (_orientation) {
+      case _VideoOrientation.portrait:
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+        ]);
+        break;
+      case _VideoOrientation.landscape:
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+        break;
+      case _VideoOrientation.auto:
+        await SystemChrome.setPreferredOrientations(
+          DeviceOrientation.values,
+        );
+        break;
+    }
+  }
+
+  // 手动横/竖屏切换
+  void _toggleOrientation() {
+    if (_isDesktop) return;
+    _userOrientationOverride = true;
+    final next = _orientation == _VideoOrientation.landscape
+        ? _VideoOrientation.portrait
+        : _VideoOrientation.landscape;
+    setState(() => _orientation = next);
+    _applyOrientation();
   }
 
   // ========== WindowListener（桌面端） ==========
@@ -233,6 +312,9 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     _verticalIndicatorTimer?.cancel();
     _verticalZone = zone;
     _verticalAdjusting = true;
+    // 记录手势起点的 y 与高度，后续用累计位移计算，支持长距离连续调节
+    _verticalDragStartDy = details.localPosition.dy;
+    _verticalDragStartHeight = MediaQuery.of(context).size.height;
     if (zone == _VerticalZone.brightness) {
       _brightnessStart = _brightness;
     } else {
@@ -244,15 +326,14 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
 
   void _onVerticalDragUpdate(DragUpdateDetails details) {
     if (!_verticalAdjusting) return;
-    final height = MediaQuery.of(context).size.height;
+    final height = _verticalDragStartHeight;
     if (height <= 0) return;
-    // 上滑增大，下滑减小
-    final delta = -(details.primaryDelta ?? 0.0) / height;
+    // 上滑增大，下滑减小；用相对手势起点的累计位移，避免每帧只取单帧增量导致"只能点划"
+    final delta = (_verticalDragStartDy - details.localPosition.dy) / height;
     if (_verticalZone == _VerticalZone.brightness) {
       _brightness = (_brightnessStart + delta).clamp(0.0, 1.0);
     } else {
-      _volumeValue =
-          (_volumeStart + delta * 100).clamp(0.0, 100.0);
+      _volumeValue = (_volumeStart + delta * 100).clamp(0.0, 100.0);
       player.setVolume(_volumeValue);
     }
     setState(() {});
@@ -850,6 +931,19 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             );
           },
         ),
+        // 横/竖屏切换（仅移动端）
+        if (!_isDesktop)
+          IconButton(
+            icon: Icon(
+              _orientation == _VideoOrientation.landscape
+                  ? Icons.screen_lock_landscape
+                  : Icons.screen_lock_portrait,
+              color: Colors.white,
+              size: 20,
+            ),
+            tooltip: '横/竖屏切换',
+            onPressed: _toggleOrientation,
+          ),
         // 锁定按钮
         IconButton(
           icon: Icon(
@@ -1170,6 +1264,9 @@ class _AdjustIndicator extends StatelessWidget {
 
 /// 垂直滑动分区：左侧亮度、右侧音量、中间不响应。
 enum _VerticalZone { none, brightness, volume }
+
+/// 移动端方向锁定状态。
+enum _VideoOrientation { auto, portrait, landscape }
 
 /// 拖拽进度时的当前时间气泡。
 class _DragSeekBubble extends StatelessWidget {

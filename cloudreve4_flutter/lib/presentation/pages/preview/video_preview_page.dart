@@ -1,7 +1,4 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../../../data/models/file_model.dart';
@@ -25,17 +22,12 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
-  bool get _isMobile => Platform.isAndroid || Platform.isIOS;
-
   @override
   void initState() {
     super.initState();
     player = Player();
     controller = VideoController(player);
-    // 支持竖屏/横屏自动旋转：竖屏视频竖屏看，横屏视频横屏看
-    if (_isMobile) {
-      SystemChrome.setPreferredOrientations(DeviceOrientation.values);
-    }
+    // 横竖屏识别、方向锁定、默认全屏由 VideoControlsOverlay 统一管理
     _loadVideoUrl();
   }
 
@@ -76,13 +68,6 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
 
   @override
   void dispose() {
-    if (_isMobile) {
-      // 恢复全局竖屏锁定
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-      ]);
-    }
     player.dispose();
     super.dispose();
   }
