@@ -190,7 +190,7 @@ $body
 
   Widget _buildDesktopWebView() {
     final origin = Uri.parse(widget.baseUrl).origin;
-    final html = _wrapHtml(widget.html);
+    final html = _wrapHtml(context, widget.html);
 
     return InAppWebView(
       key: _desktopKey,
