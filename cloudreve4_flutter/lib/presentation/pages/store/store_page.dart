@@ -44,6 +44,11 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
     try {
       final config = await StoreService.instance.getStoreConfig();
       if (!mounted) return;
+      // 确保用户设置（含积分）已加载，购买确认时能显示当前积分
+      final settingsProvider = context.read<UserSettingProvider>();
+      if (settingsProvider.settings == null) {
+        await settingsProvider.loadSettings();
+      }
       setState(() {
         _config = config;
         _isLoading = false;
@@ -380,6 +385,39 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
     return null;
   }
 
+  /// 当前积分余额展示；积分不足时给出提示。
+  Widget _buildPointsBalance(BuildContext ctx, int credit, int? pointsNeeded) {
+    final theme = Theme.of(ctx);
+    final insufficient = pointsNeeded != null && credit < pointsNeeded;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(LucideIcons.coins, size: 16, color: theme.colorScheme.primary),
+            const SizedBox(width: 6),
+            Text(
+              '当前积分：$credit',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        if (insufficient) ...[
+          const SizedBox(height: 6),
+          Text(
+            '积分不足，还需 ${pointsNeeded! - credit} 积分',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   Future<void> _confirmPurchase(StorageProduct product, StoreConfig config) async {
     StorePaymentProvider? selectedProvider = _defaultPayProvider(config);
 
@@ -390,6 +428,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final providers = _payProviders(config);
+            final credit = ctx.read<UserSettingProvider>().settings?.credit ?? 0;
 
             return SafeArea(
               child: Padding(
@@ -406,6 +445,10 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 12),
                     _PurchaseSummary(product: product, payment: config.payment),
+                    if (config.pointEnabled) ...[
+                      const SizedBox(height: 12),
+                      _buildPointsBalance(ctx, credit, product.points),
+                    ],
                     if (providers.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       Text(
@@ -458,7 +501,18 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                         const SizedBox(width: 12),
                         Expanded(
                           child: FilledButton(
-                            onPressed: () => Navigator.of(ctx).pop(true),
+                            onPressed: () {
+                              final usePoints = selectedProvider?.type == 'points';
+                              if (usePoints &&
+                                  product.points != null &&
+                                  credit < product.points!) {
+                                ToastHelper.failure(
+                                  '积分不足，当前 $credit 积分，需要 ${product.points!} 积分',
+                                );
+                                return;
+                              }
+                              Navigator.of(ctx).pop(true);
+                            },
                             child: Text(product.price == 0 ? '领取' : '购买'),
                           ),
                         ),
@@ -534,6 +588,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
             final providers = _payProviders(config);
+            final credit = ctx.read<UserSettingProvider>().settings?.credit ?? 0;
 
             return SafeArea(
               child: Padding(
@@ -550,6 +605,10 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 12),
                     _GroupPurchaseSummary(product: product, payment: config.payment),
+                    if (config.pointEnabled) ...[
+                      const SizedBox(height: 12),
+                      _buildPointsBalance(ctx, credit, product.points),
+                    ],
                     if (providers.isNotEmpty) ...[
                       const SizedBox(height: 16),
                       Text(
@@ -600,7 +659,18 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                         const SizedBox(width: 12),
                         Expanded(
                           child: FilledButton(
-                            onPressed: () => Navigator.of(ctx).pop(true),
+                            onPressed: () {
+                              final usePoints = selectedProvider?.type == 'points';
+                              if (usePoints &&
+                                  product.points != null &&
+                                  credit < product.points!) {
+                                ToastHelper.failure(
+                                  '积分不足，当前 $credit 积分，需要 ${product.points!} 积分',
+                                );
+                                return;
+                              }
+                              Navigator.of(ctx).pop(true);
+                            },
                             child: Text(product.price == 0 ? '领取' : '购买'),
                           ),
                         ),
