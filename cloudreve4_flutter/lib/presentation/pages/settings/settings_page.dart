@@ -148,6 +148,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: const Text('版本号'),
                 subtitle: Text(_appVersion.isEmpty ? '加载中...' : _appVersion),
               ),
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: const Text('开发者'),
+                subtitle: const Text('余鹏 · qyudeng@aliyun.com'),
+              ),
             ],
           ),
           const SizedBox(height: 24),
