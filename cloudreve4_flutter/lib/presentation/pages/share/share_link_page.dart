@@ -400,8 +400,8 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
     }
   }
 
-  /// 目录级别「转存」：同源直接把当前目录已加载的全部文件/子目录批量转存；
-  /// 异源走打包 + 离线下载。
+  /// 目录级别「转存」：同源先把当前目录全部文件加载完，再分批批量转存，
+  /// 避免只转存当前已加载的分页部分；异源走打包 + 离线下载。
   Future<void> _saveFolderContents({
     required String name,
     String? candidateUri,
@@ -414,12 +414,50 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
       );
       return;
     }
-    if (_files.isEmpty) {
-      ToastHelper.warning('当前目录为空，没有可转存的内容');
-      return;
+    if (_busyBatchSave || _busySave) return;
+    final destination = await _pickDestination();
+    if (destination == null || !mounted) return;
+    setState(() => _busyBatchSave = true);
+
+    try {
+      // 自动加载全部剩余页，确保「全部转存」而不只是当前已加载部分。
+      var guard = 0;
+      while (_hasMoreFiles &&
+          (_totalItems == null || _files.length < _totalItems!) &&
+          guard < 500) {
+        await _loadMoreFolderFiles();
+        if (!mounted) return;
+        guard++;
+      }
+      final uris = _files
+          .map(_shareFileUri)
+          .map((u) => u.trim())
+          .where((u) => u.isNotEmpty)
+          .toList();
+      if (uris.isEmpty) {
+        if (mounted) ToastHelper.warning('当前目录为空，没有可转存的内容');
+        return;
+      }
+      // 分批转存，避免单次请求 uri 过多被服务端拒绝。
+      const batch = 150;
+      var done = 0;
+      for (var i = 0; i < uris.length; i += batch) {
+        final end = i + batch > uris.length ? uris.length : i + batch;
+        await _transferUris(uris.sublist(i, end), destination);
+        done += end - i;
+        if (!mounted) return;
+      }
+      if (mounted) ToastHelper.success('已转存 $done 项到 $destination');
+    } catch (e) {
+      if (!mounted) return;
+      if (_isGroupForbidden(e)) {
+        ToastHelper.failure('所在用户组不允许转存，请联系管理员开通');
+      } else {
+        ToastHelper.failure('转存失败：$e');
+      }
+    } finally {
+      if (mounted) setState(() => _busyBatchSave = false);
     }
-    final uris = _files.map(_shareFileUri).toList();
-    await _saveUrisToCloud(uris: uris);
   }
 
   /// 批量转存选中的文件/子目录。
@@ -441,11 +479,7 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
     setState(() => _busyBatchSave = true);
 
     try {
-      await ShareLinkService.instance.saveSharedFiles(
-        context: _context,
-        uris: uris,
-        destination: destination,
-      );
+      await _transferUris(uris, destination);
       if (!mounted) return;
       ToastHelper.success('已转存 ${uris.length} 项到 $destination');
       setState(() {
@@ -462,6 +496,15 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
     } finally {
       if (mounted) setState(() => _busyBatchSave = false);
     }
+  }
+
+  /// 核心转存请求：POST /file/move（copy=true）。
+  Future<void> _transferUris(List<String> uris, String destination) async {
+    await ShareLinkService.instance.saveSharedFiles(
+      context: _context,
+      uris: uris,
+      destination: destination,
+    );
   }
 
   String _fileKey(ShareLinkFile file) =>
