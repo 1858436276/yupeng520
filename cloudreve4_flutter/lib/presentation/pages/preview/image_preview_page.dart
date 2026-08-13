@@ -157,7 +157,7 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
     final scale = _photoController.scale ?? 1.0;
     if (scale > 1.05) return;
     final velocity = details.primaryVelocity ?? 0;
-    if (velocity > 700 || details.primaryDelta! > 160) {
+    if (velocity > 700) {
       Navigator.of(context).pop();
     }
   }
@@ -225,11 +225,9 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
       final file =
           File('${tempDir.path}${Platform.pathSeparator}${widget.file.name}');
       await file.writeAsBytes(bytes);
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path, mimeType: _mimeType())],
-          subject: widget.file.name,
-        ),
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: _mimeType())],
+        subject: widget.file.name,
       );
     } catch (e) {
       if (mounted) ToastHelper.failure('分享失败：$e');
