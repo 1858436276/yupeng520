@@ -126,7 +126,12 @@ class _TransferredFilesPageState extends State<TransferredFilesPage> {
 
   void _openFile(FileModel file) {
     if (FileTypeUtils.isImage(file.name)) {
-      Navigator.of(context).pushNamed(RouteNames.imagePreview, arguments: file);
+      final index = _files.indexWhere((f) => f.id == file.id);
+      Navigator.of(context).pushNamed(RouteNames.imagePreview, arguments: {
+        'file': file,
+        'files': _files,
+        'index': index < 0 ? 0 : index,
+      });
     } else if (FileTypeUtils.isPdf(file.name)) {
       PdfActionMenu.show(context, file);
     } else if (FileTypeUtils.isVideo(file.name)) {

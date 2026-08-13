@@ -15,12 +15,20 @@ import '../../../services/cache_manager_service.dart';
 import '../../../services/file_service.dart';
 import '../../widgets/toast_helper.dart';
 
-/// 图片预览页面（大厂风格：全屏黑底、单击显隐控制栏、双指缩放、下滑关闭、旋转/保存/分享）
+/// 图片预览页面（大厂风格：全屏黑底、单击显隐控制栏、双指缩放、下滑关闭、旋转/保存/分享、左右切换）
 class ImagePreviewPage extends StatefulWidget {
   final FileModel file;
   final String? entityId;
+  final List<FileModel>? files;
+  final int initialIndex;
 
-  const ImagePreviewPage({super.key, required this.file, this.entityId});
+  const ImagePreviewPage({
+    super.key,
+    required this.file,
+    this.entityId,
+    this.files,
+    this.initialIndex = 0,
+  });
 
   @override
   State<ImagePreviewPage> createState() => _ImagePreviewPageState();
@@ -41,15 +49,27 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
   // 旋转（90° 步进）
   int _quarterTurns = 0;
 
+  // 图片列表与当前索引（支持上一张/下一张切换）
+  late final List<FileModel> _images;
+  late int _index;
+
   // 保存/分享加载态
   bool _saving = false;
   bool _sharing = false;
 
   bool get _isDesktop => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
+  FileModel get _currentFile => _images[_index];
+  bool get _canPrev => _images.length > 1 && _index > 0;
+  bool get _canNext => _images.length > 1 && _index < _images.length - 1;
+
   @override
   void initState() {
     super.initState();
+    _images = (widget.files != null && widget.files!.isNotEmpty)
+        ? widget.files!
+        : [_currentFile];
+    _index = widget.initialIndex.clamp(0, _images.length - 1);
     _zoomController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 200),
@@ -74,7 +94,7 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
   Future<void> _loadImageUrl() async {
     try {
       final response = await FileService().getDownloadUrls(
-        uris: [widget.file.relativePath],
+        uris: [_currentFile.relativePath],
         download: false,
         entity: widget.entityId,
       );
@@ -130,6 +150,28 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
     }
   }
 
+  // 切换图片：重置缩放/旋转并重新加载
+  void _jumpTo(int index) {
+    _zoomController.stop();
+    _photoController.scale = 1.0;
+    setState(() {
+      _index = index;
+      _quarterTurns = 0;
+      _isLoading = true;
+      _errorMessage = null;
+      _imageUrl = null;
+    });
+    _loadImageUrl();
+  }
+
+  void _goPrev() {
+    if (_canPrev) _jumpTo(_index - 1);
+  }
+
+  void _goNext() {
+    if (_canNext) _jumpTo(_index + 1);
+  }
+
   // Ctrl + 滚轮缩放（Linux/Windows 桌面端）
   void _onPointerSignal(PointerScrollEvent e) {
     final isControlPressed =
@@ -179,7 +221,7 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
   }
 
   String _mimeType() {
-    final name = widget.file.name.toLowerCase();
+    final name = _currentFile.name.toLowerCase();
     if (name.endsWith('.png')) return 'image/png';
     if (name.endsWith('.gif')) return 'image/gif';
     if (name.endsWith('.webp')) return 'image/webp';
@@ -197,13 +239,13 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
         ToastHelper.failure('无法获取下载目录');
         return;
       }
-      var dest = File('${dir.path}${Platform.pathSeparator}${widget.file.name}');
+      var dest = File('${dir.path}${Platform.pathSeparator}${_currentFile.name}');
       var index = 1;
       while (dest.existsSync()) {
-        final dot = widget.file.name.lastIndexOf('.');
+        final dot = _currentFile.name.lastIndexOf('.');
         final stem =
-            dot > 0 ? widget.file.name.substring(0, dot) : widget.file.name;
-        final ext = dot > 0 ? widget.file.name.substring(dot) : '';
+            dot > 0 ? _currentFile.name.substring(0, dot) : _currentFile.name;
+        final ext = dot > 0 ? _currentFile.name.substring(dot) : '';
         dest = File('${dir.path}${Platform.pathSeparator}$stem($index)$ext');
         index++;
       }
@@ -223,11 +265,11 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
       final bytes = await _downloadBytes();
       final tempDir = await getTemporaryDirectory();
       final file =
-          File('${tempDir.path}${Platform.pathSeparator}${widget.file.name}');
+          File('${tempDir.path}${Platform.pathSeparator}${_currentFile.name}');
       await file.writeAsBytes(bytes);
       await Share.shareXFiles(
         [XFile(file.path, mimeType: _mimeType())],
-        subject: widget.file.name,
+        subject: _currentFile.name,
       );
     } catch (e) {
       if (mounted) ToastHelper.failure('分享失败：$e');
@@ -244,6 +286,42 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
         fit: StackFit.expand,
         children: [
           _buildBody(),
+          // 上一张/下一张：跟随控制栏显隐，垂直居中于左右两侧
+          if (_images.length > 1)
+            IgnorePointer(
+              ignoring: !_showOverlay,
+              child: AnimatedOpacity(
+                opacity: _showOverlay ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 220),
+                child: Row(
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: _buildNavButton(
+                          Icons.chevron_left,
+                          _canPrev,
+                          _goPrev,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: _buildNavButton(
+                          Icons.chevron_right,
+                          _canNext,
+                          _goNext,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           AnimatedOpacity(
             opacity: _showOverlay ? 1.0 : 0.0,
             duration: const Duration(milliseconds: 220),
@@ -259,6 +337,16 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildNavButton(IconData icon, bool enabled, VoidCallback onTap) {
+    return IconButton(
+      icon: Icon(icon, color: Colors.white, size: 32),
+      onPressed: enabled ? onTap : null,
+      style: IconButton.styleFrom(
+        backgroundColor: enabled ? Colors.black38 : Colors.transparent,
       ),
     );
   }
@@ -286,7 +374,7 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
           ),
           Expanded(
             child: Text(
-              widget.file.name,
+              _currentFile.name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -302,7 +390,7 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
   }
 
   Widget _buildBottomBar() {
-    final size = widget.file.size;
+    final size = _currentFile.size;
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -319,6 +407,13 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
       ),
       child: Row(
         children: [
+          if (_images.length > 1) ...[
+            Text(
+              '${_index + 1}/${_images.length}',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+            const SizedBox(width: 10),
+          ],
           const Text(
             '下滑关闭 · 双击缩放',
             style: TextStyle(color: Colors.white60, fontSize: 12),

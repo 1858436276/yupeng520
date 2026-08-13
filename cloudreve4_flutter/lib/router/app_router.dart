@@ -151,6 +151,8 @@ class AppRouter {
             builder: (context) => ImagePreviewPage(
               file: args['file'] as FileModel,
               entityId: args['entityId'] as String?,
+              files: args['files'] as List<FileModel>?,
+              initialIndex: (args['index'] as int?) ?? 0,
             ),
           );
         }

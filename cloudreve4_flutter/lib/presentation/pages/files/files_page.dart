@@ -1789,7 +1789,13 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
 
   void _openFile(BuildContext context, FileModel file) {
     if (FileTypeUtils.isImage(file.name)) {
-      Navigator.of(context).pushNamed(RouteNames.imagePreview, arguments: file);
+      final files = Provider.of<FileManagerProvider>(context, listen: false).files;
+      final index = files.indexWhere((f) => f.id == file.id);
+      Navigator.of(context).pushNamed(RouteNames.imagePreview, arguments: {
+        'file': file,
+        'files': files,
+        'index': index < 0 ? 0 : index,
+      });
     } else if (FileTypeUtils.isPdf(file.name)) {
       PdfActionMenu.show(context, file);
     } else if (FileTypeUtils.isVideo(file.name)) {
