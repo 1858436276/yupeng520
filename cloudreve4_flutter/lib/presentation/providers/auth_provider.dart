@@ -274,10 +274,20 @@ Future<bool> passwordLogin({
     }
   }
 
-  /// 刷新用户信息
+  /// 刷新用户信息（安全版）。
+  ///
+  /// 用于拉取最新用户信息（含用户组）。该请求走 [AuthService.getCurrentUser]
+  /// 的 noTokenRefresh 模式：
+  /// - token 过期时直接失败，不会触发 ApiService 的 token 刷新/登出链路
+  /// - 任何失败只记日志，绝不改写登录状态、不抛出异常
+  ///
+  /// 防止"进入我的/设置页 -> /user/me 401 -> 刷新失败 -> clearAuth -> 登出"
+  /// 的问题再次出现。
   Future<void> refreshUser() async {
     try {
-      final user = await AuthService.instance.getCurrentUser();
+      final user = await AuthService.instance.getCurrentUser(
+        noTokenRefresh: true,
+      );
       setUser(user);
 
       // 更新服务器中的用户信息（保留 token）
@@ -288,11 +298,7 @@ Future<bool> passwordLogin({
         );
       }
     } catch (e) {
-      _errorMessage = UserFriendlyError.fromObject(
-        e,
-        action: 'login',
-        fallback: '操作失败，请检查网络、服务器地址或账号信息后重试。',
-      );
+      AppLogger.d('刷新用户信息失败（不影响登录态）: $e');
     }
   }
 

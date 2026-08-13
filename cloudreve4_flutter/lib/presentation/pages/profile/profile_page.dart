@@ -31,6 +31,9 @@ class _ProfilePageState extends State<ProfilePage> {
     userSetting.loadCapacity();
 
     final authProvider = context.read<AuthProvider>();
+    // 安全刷新用户信息（含用户组）：走 noTokenRefresh，失败不影响登录态
+    await authProvider.refreshUser();
+    if (!mounted) return;
     if (!authProvider.isAdmin) return;
 
     final adminProvider = context.read<AdminProvider>();

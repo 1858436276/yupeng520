@@ -188,10 +188,14 @@ class AuthService {
     }
   }
 
-  /// 获取当前用户信息
-  Future<UserModel> getCurrentUser() async {
+  /// 获取当前用户信息。
+  ///
+  /// [noTokenRefresh] 为 true 时该请求在 token 过期时不会触发刷新/登出链路，
+  /// 而是直接失败（用于"刷新用户组"等只读场景，防止误登出）。
+  Future<UserModel> getCurrentUser({bool noTokenRefresh = false}) async {
     final response = await ApiService.instance.get<Map<String, dynamic>>(
       '/user/me',
+      noTokenRefresh: noTokenRefresh,
     );
     return UserModel.fromJson(response);
   }

@@ -34,6 +34,8 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadAppVersion();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<UserSettingProvider>().loadAll();
+      // 安全刷新用户信息（含用户组）：走 noTokenRefresh，失败不影响登录态
+      context.read<AuthProvider>().refreshUser();
     });
   }
 
