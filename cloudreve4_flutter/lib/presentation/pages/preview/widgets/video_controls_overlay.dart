@@ -128,8 +128,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     if (_isDesktop) return;
     _videoParamsSub = player.stream.videoParams.listen((params) {
       if (_userOrientationOverride) return;
-      final w = params.width;
-      final h = params.height;
+      final w = params.w;
+      final h = params.h;
       if (w == null || h == null || w <= 0 || h <= 0) return;
       // 宽 > 高视为横屏视频，否则竖屏视频
       final next = w > h
