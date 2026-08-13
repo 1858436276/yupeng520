@@ -31,9 +31,6 @@ class _ProfilePageState extends State<ProfilePage> {
     userSetting.loadCapacity();
 
     final authProvider = context.read<AuthProvider>();
-    // 从服务端拉取最新用户信息（含用户组），避免管理端修改用户组后本地仍是旧值
-    await authProvider.refreshUser();
-    if (!mounted) return;
     if (!authProvider.isAdmin) return;
 
     final adminProvider = context.read<AdminProvider>();
