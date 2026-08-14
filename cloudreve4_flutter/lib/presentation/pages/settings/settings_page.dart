@@ -17,7 +17,6 @@ import 'credit_history_page.dart';
 import 'quick_access_settings_page.dart';
 import '../../../router/app_router.dart';
 import 'package:cloudreve4_flutter/mkw_packager/generated/update_config.dart' as mkw_update;
-
 /// 设置主页
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -34,11 +33,6 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _loadAppVersion();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // 进入页面时刷新用户信息（含用户组）和用户设置
-      final auth = context.read<AuthProvider>();
-      auth.refreshUser().catchError((e) {
-        debugPrint('刷新用户信息失败: $e');
-      });
       context.read<UserSettingProvider>().loadAll();
     });
   }
@@ -50,14 +44,8 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (_) {}
   }
 
-  /// 刷新：同时刷新用户信息和设置
   Future<void> _refresh() async {
-    final auth = context.read<AuthProvider>();
-    final setting = context.read<UserSettingProvider>();
-    await Future.wait([
-      auth.refreshUser(),
-      setting.loadAll(),
-    ]);
+    await context.read<UserSettingProvider>().loadAll();
   }
 
   @override
@@ -94,77 +82,77 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       body: DesktopConstrained(
         child: ListView(
-          children: [
-            _buildProfileCard(context, user, settings, capacity),
-            const SizedBox(height: 8),
-            _buildSection(
-              title: '账户与安全',
-              children: [
-                _SettingsTile(
-                  icon: Icons.person_outline,
-                  title: '个人资料',
-                  subtitle: '修改昵称、头像',
-                  onTap: () => _navigateTo(context, const ProfileEditPage()),
-                ),
-                _SettingsTile(
-                  icon: Icons.security_outlined,
-                  title: '安全设置',
-                  subtitle: _securitySubtitle(settings),
-                  onTap: () => _navigateTo(context, const SecuritySettingsPage()),
-                ),
-              ],
-            ),
-            _buildSection(
-              title: '偏好',
-              children: [
-                _SettingsTile(
-                  icon: Icons.sync_outlined,
-                  title: '文件同步',
-                  subtitle: '本地与云端文件自动同步',
-                  onTap: () => Navigator.of(context).pushNamed(RouteNames.syncSettings),
-                ),
-                _SettingsTile(
-                  icon: Icons.apps_outlined,
-                  title: '快捷入口',
-                  subtitle: '自定义概览页快捷目录',
-                  onTap: () => _navigateTo(context, const QuickAccessSettingsPage()),
-                ),
-                if (mkw_update.mkwShowUpdateEntry) _SettingsTile(
-                  icon: Icons.folder_outlined,
-                  title: '文件偏好',
-                  subtitle: '版本保留、视图同步、分享可见性',
-                  onTap: () => _navigateTo(context, const FilePreferencesPage()),
-                ),
-                if (mkw_update.mkwShowUpdateEntry) _SettingsTile(
-                  icon: Icons.tune,
-                  title: '应用设置',
-                  subtitle: '缓存、主题、语言',
-                  onTap: () => _navigateTo(context, const AppSettingsPage()),
-                ),
-              ],
-            ),
-            // Pro 功能区域（有数据时才显示）
-            if (settings != null) ..._buildProSections(context, settings),
-            _buildSection(
-              title: '关于',
-              children: [
-                if (mkw_update.mkwShowUpdateEntry) ListTile(
-                  leading: const Icon(Icons.info_outline),
-                  title: const Text('应用名称'),
-                  subtitle: const Text('小白云盘 V4.0'),
-                ),
-                if (mkw_update.mkwShowUpdateEntry) ListTile(
-                  leading: const Icon(Icons.tag),
-                  title: const Text('版本号'),
-                  subtitle: Text(_appVersion.isEmpty ? '加载中...' : _appVersion),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            _buildLogoutButton(context, auth),
-            const SizedBox(height: 32),
-          ],
-        ),
+        children: [
+          _buildProfileCard(context, user, settings, capacity),
+          const SizedBox(height: 8),
+          _buildSection(
+            title: '账户与安全',
+            children: [
+              _SettingsTile(
+                icon: Icons.person_outline,
+                title: '个人资料',
+                subtitle: '修改昵称、头像',
+                onTap: () => _navigateTo(context, const ProfileEditPage()),
+              ),
+              _SettingsTile(
+                icon: Icons.security_outlined,
+                title: '安全设置',
+                subtitle: _securitySubtitle(settings),
+                onTap: () => _navigateTo(context, const SecuritySettingsPage()),
+              ),
+            ],
+          ),
+          _buildSection(
+            title: '偏好',
+            children: [
+              _SettingsTile(
+                icon: Icons.sync_outlined,
+                title: '文件同步',
+                subtitle: '本地与云端文件自动同步',
+                onTap: () => Navigator.of(context).pushNamed(RouteNames.syncSettings),
+              ),
+              _SettingsTile(
+                icon: Icons.apps_outlined,
+                title: '快捷入口',
+                subtitle: '自定义概览页快捷目录',
+                onTap: () => _navigateTo(context, const QuickAccessSettingsPage()),
+              ),
+              if (mkw_update.mkwShowUpdateEntry) _SettingsTile(
+                icon: Icons.folder_outlined,
+                title: '文件偏好',
+                subtitle: '版本保留、视图同步、分享可见性',
+                onTap: () => _navigateTo(context, const FilePreferencesPage()),
+              ),
+              if (mkw_update.mkwShowUpdateEntry) _SettingsTile(
+                icon: Icons.tune,
+                title: '应用设置',
+                subtitle: '缓存、主题、语言',
+                onTap: () => _navigateTo(context, const AppSettingsPage()),
+              ),
+            ],
+          ),
+          // Pro 功能区域（有数据时才显示）
+          if (settings != null) ..._buildProSections(context, settings),
+          _buildSection(
+            title: '关于',
+            children: [
+              if (mkw_update.mkwShowUpdateEntry) ListTile(
+                leading: const Icon(Icons.info_outline),
+                title: const Text('应用名称'),
+                subtitle: const Text('小白云盘 V4.0'),
+              ),
+              if (mkw_update.mkwShowUpdateEntry) ListTile(
+                leading: const Icon(Icons.tag),
+                title: const Text('版本号'),
+                subtitle: Text(_appVersion.isEmpty ? '加载中...' : _appVersion),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          _buildLogoutButton(context, auth),
+          const SizedBox(height: 32),
+        ],
+      ),
       ),
     );
   }
@@ -207,10 +195,7 @@ class _SettingsPageState extends State<SettingsPage> {
           onTap: () => _navigateTo(context, CreditHistoryPage(currentCredit: settings.credit)),
         ));
       }
-      // 只有 children 非空才添加 Section，避免空白标题
-      if (children.isNotEmpty) {
-        sections.add(_buildSection(title: 'Pro 功能', children: children));
-      }
+      sections.add(_buildSection(title: 'Pro 功能', children: children));
     }
     return sections;
   }
@@ -313,7 +298,6 @@ class _SettingsPageState extends State<SettingsPage> {
             value: (percent / 100).clamp(0.0, 1.0),
             minHeight: 6,
             backgroundColor: colorScheme.surfaceContainerHighest,
-            valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
           ),
         ),
       ],
@@ -321,7 +305,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildSection({required String title, required List<Widget> children}) {
-    if (children.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(
@@ -452,23 +435,19 @@ class _SettingsPageState extends State<SettingsPage> {
       await UserSettingService.instance.updateUserSetting(groupExpires: true);
       if (!context.mounted) return;
       await context.read<UserSettingProvider>().loadSettings();
-      // 取消会员后刷新用户信息
-      await context.read<AuthProvider>().refreshUser();
       if (mounted) ToastHelper.success('会员已取消');
     } catch (e) {
       if (mounted) ToastHelper.failure('取消会员失败: $e');
     }
   }
 
-  /// 导航到子页面，返回时刷新用户信息和设置
+
   Future<void> _navigateTo(BuildContext context, Widget page) async {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => page));
     if (!context.mounted) return;
-    final auth = context.read<AuthProvider>();
-    await Future.wait([
-      auth.refreshUser(),
-      context.read<UserSettingProvider>().loadAll(),
-    ]);
+    if (mounted) {
+      context.read<UserSettingProvider>().loadAll();
+    }
   }
 
   Future<void> _confirmLogout(BuildContext context, AuthProvider auth) async {
@@ -491,7 +470,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (confirmed == true && mounted) {
       await auth.logout();
       if (!context.mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil(RouteNames.login, (route) => false);
+      Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
     }
   }
 
