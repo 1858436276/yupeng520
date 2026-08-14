@@ -167,9 +167,16 @@ class ApiService {
                 options.path.contains('/session/token/refresh');
             final alreadyRetried =
                 options.extra['_retried401'] as bool? ?? false;
+            final noTokenRefresh =
+                options.extra['noTokenRefresh'] as bool? ?? false;
             AppLogger.d(
-                '_responseInterceptor -> 401 isNoAuth=$isNoAuth isRefreshPath=$isRefreshPath alreadyRetried=$alreadyRetried');
-            if (!isNoAuth && !isRefreshPath && !alreadyRetried) {
+                '_responseInterceptor -> 401 isNoAuth=$isNoAuth isRefreshPath=$isRefreshPath alreadyRetried=$alreadyRetried noTokenRefresh=$noTokenRefresh');
+            // noTokenRefresh: 只读请求（如刷新用户信息）不做 token 刷新，
+            // 避免 token 过期时把用户登出
+            if (!isNoAuth &&
+                !isRefreshPath &&
+                !alreadyRetried &&
+                !noTokenRefresh) {
               // 标记已重试，防止重试响应再次 401 时无限循环
               options.extra['_retried401'] = true;
               final retried = await _refreshAndRetry(options);
@@ -270,7 +277,9 @@ class ApiService {
         if (is401Error) {
           final isNoAuth =
               error.requestOptions.extra['noAuth'] as bool? ?? false;
-          if (!isNoAuth) {
+          final noTokenRefresh =
+              error.requestOptions.extra['noTokenRefresh'] as bool? ?? false;
+          if (!isNoAuth && !noTokenRefresh) {
             // 不是noAuth请求，需要刷新token
             final response = await _handle401Error(error, handler);
             if (response != null) {
@@ -331,6 +340,13 @@ class ApiService {
     DioException error,
     ErrorInterceptorHandler handler,
   ) async {
+    // noTokenRefresh：只读请求不刷新 token，直接放行原始错误，
+    // 防止刷新失败触发 clearAuth 把用户登出
+    final noTokenRefresh =
+        error.requestOptions.extra['noTokenRefresh'] as bool? ?? false;
+    if (noTokenRefresh) {
+      return null;
+    }
     // 检查是否需要跳过token检查（如刷新token请求本身）
     final path = error.requestOptions.path;
     if (path.contains('/session/token/refresh')) {
@@ -404,12 +420,20 @@ class ApiService {
     bool noAuth = false,
     bool isNoData = false,
     bool silent404 = false,
+    bool noTokenRefresh = false,
     Map<String, dynamic>? headers,
   }) async {
     final response = await _dio.get<T>(
       path,
       queryParameters: queryParameters,
-      options: Options(extra: {'noAuth': noAuth, 'silent404': silent404}, headers: headers),
+      options: Options(
+        extra: {
+          'noAuth': noAuth,
+          'silent404': silent404,
+          'noTokenRefresh': noTokenRefresh,
+        },
+        headers: headers,
+      ),
     );
     // 如果是分享请求, 则不进入 _parseResponse
     if (isNoData) {
