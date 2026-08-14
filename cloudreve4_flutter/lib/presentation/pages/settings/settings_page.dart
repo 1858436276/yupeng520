@@ -146,6 +146,11 @@ class _SettingsPageState extends State<SettingsPage> {
                 title: const Text('版本号'),
                 subtitle: Text(_appVersion.isEmpty ? '加载中...' : _appVersion),
               ),
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: const Text('开发者'),
+                subtitle: const Text('余鹏 · qyudeng@aliyun.com'),
+              ),
             ],
           ),
           const SizedBox(height: 24),
@@ -161,10 +166,10 @@ class _SettingsPageState extends State<SettingsPage> {
   List<Widget> _buildProSections(BuildContext context, UserSettingModel settings) {
     final sections = <Widget>[];
     final hasStoragePacks = settings.storagePacks.isNotEmpty;
-    final hasCredit = settings.credit > 0;
     final hasMembership = settings.groupExpires != null;
 
-    if (hasStoragePacks || hasCredit || hasMembership) {
+    // 积分余额始终展示（包括 0），方便用户了解积分情况
+    if (hasStoragePacks || hasMembership || settings.credit >= 0) {
       final children = <Widget>[];
       if (hasMembership) {
         children.add(ListTile(
@@ -186,15 +191,13 @@ class _SettingsPageState extends State<SettingsPage> {
           onTap: () => _showStoragePacks(context, settings.storagePacks),
         ));
       }
-      if (hasCredit) {
-        children.add(ListTile(
-          leading: const Icon(Icons.account_balance_wallet_outlined),
-          title: const Text('积分'),
-          subtitle: Text('${settings.credit} 积分'),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _navigateTo(context, CreditHistoryPage(currentCredit: settings.credit)),
-        ));
-      }
+      children.add(ListTile(
+        leading: const Icon(Icons.account_balance_wallet_outlined),
+        title: const Text('积分'),
+        subtitle: Text('${settings.credit} 积分'),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => _navigateTo(context, CreditHistoryPage(currentCredit: settings.credit)),
+      ));
       sections.add(_buildSection(title: 'Pro 功能', children: children));
     }
     return sections;
