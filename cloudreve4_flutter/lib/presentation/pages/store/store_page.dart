@@ -459,21 +459,23 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                       ),
                       const SizedBox(height: 8),
                       RadioGroup<StorePaymentProvider>(
-                        groupValue: selectedProvider,
+                        groupValue: selectedProvider, // 统一管理选中的状态
                         onChanged: (value) => setSheetState(() {
                           selectedProvider = value;
                         }),
+                        // 💡 2. 用 Column 容纳通过 map 遍历出来的 RadioListTile 列表
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: providers.map(
                             (provider) => RadioListTile<StorePaymentProvider>(
                               value: provider,
+                              // 💡 3. 这里成功去掉了已经废弃的 groupValue 和 onChanged
                               title: Text(provider.name),
                               subtitle: Text(provider.type == 'points'
                                   ? '使用站内积分购买'
                                   : provider.type),
                             ),
-                          ).toList(),
+                          ).toList(), // 记得转成 List
                         ),
                       ),
                     ] else ...[
@@ -516,8 +518,6 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                         ),
                       ],
                     ),
-                    // ✅ 新增底部间距，避开导航栏
-                    SizedBox(height: MediaQuery.of(ctx).padding.bottom + 8),
                   ],
                 ),
               ),
@@ -676,8 +676,6 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
                         ),
                       ],
                     ),
-                    // ✅ 新增底部间距，避开导航栏
-                    SizedBox(height: MediaQuery.of(ctx).padding.bottom + 8),
                   ],
                 ),
               ),
