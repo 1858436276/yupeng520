@@ -27,20 +27,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _initData() async {
-    // 1. 先刷新当前用户信息（包含用户组）
-    final authProvider = context.read<AuthProvider>();
-    try {
-      await authProvider.refreshUser();
-    } catch (e) {
-      debugPrint('刷新用户信息失败: $e');
-      // 失败不阻塞后续加载
-    }
-
-    // 2. 加载容量信息
     final userSetting = context.read<UserSettingProvider>();
     userSetting.loadCapacity();
 
-    // 3. 如果是管理员，加载管理员数据
+    final authProvider = context.read<AuthProvider>();
     if (!authProvider.isAdmin) return;
 
     final adminProvider = context.read<AdminProvider>();
@@ -49,7 +39,7 @@ class _ProfilePageState extends State<ProfilePage> {
     await adminProvider.loadAll();
     if (!mounted) return;
 
-    // 4. 批量检查头像更新
+    // 批量检查头像更新，限制并发避免阻塞主线程
     final users = adminProvider.users;
     final baseUrl = authProvider.currentServer?.baseUrl ?? '';
     final token = authProvider.token?.accessToken ?? '';
