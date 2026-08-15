@@ -6,14 +6,51 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
+import '../../../../core/utils/file_type_utils.dart';
 import '../../../../core/utils/video_fullscreen.dart';
+import '../../../../data/models/file_model.dart';
+import '../../../widgets/toast_helper.dart';
 
 /// 自定义视频控制栏叠加层（Bilibili 风格）
 class VideoControlsOverlay extends StatefulWidget {
   final VideoState state;
   final String title;
 
-  const VideoControlsOverlay({super.key, required this.state, required this.title});
+  /// 当前目录视频列表（用于全屏后选择/切换视频）
+  final List<FileModel>? playlist;
+  final int playlistIndex;
+
+  /// 切换视频：由页面获取播放地址并 player.open
+  final Future<void> Function(FileModel file, Player player)? onSwitchVideo;
+
+  /// 重开当前媒体（解码方式切换后生效）
+  final Future<void> Function(Player player)? onReload;
+
+  /// 画面比例模式：16:9 / 4:3 / 1:1 / original / fill
+  final String aspectMode;
+  final ValueChanged<String>? onSetAspect;
+
+  /// 解码方式：auto=硬解，no=软解
+  final String hwdecMode;
+  final ValueChanged<String>? onSetHwdec;
+
+  /// 小屏播放（悬浮小窗）
+  final VoidCallback? onMiniPlayer;
+
+  const VideoControlsOverlay({
+    super.key,
+    required this.state,
+    required this.title,
+    this.playlist,
+    this.playlistIndex = 0,
+    this.onSwitchVideo,
+    this.onReload,
+    this.aspectMode = 'original',
+    this.onSetAspect,
+    this.hwdecMode = 'auto',
+    this.onSetHwdec,
+    this.onMiniPlayer,
+  });
 
   @override
   State<VideoControlsOverlay> createState() => _VideoControlsOverlayState();
@@ -37,6 +74,10 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
 
   // 自管全屏状态
   bool _isFullscreen = false;
+
+  // 播放列表：当前目录视频切换
+  late int _playlistIndex;
+  late String _title;
 
   // 方向控制（移动端）：按视频宽高比自动锁定横/竖屏，旋转按钮可手动切换
   _VideoOrientation _orientation = _VideoOrientation.auto;
@@ -79,6 +120,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   @override
   void initState() {
     super.initState();
+    _playlistIndex = widget.playlistIndex;
+    _title = widget.title;
     _startHideTimer();
     if (_isDesktop) {
       windowManager.addListener(this);
@@ -565,6 +608,263 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     );
   }
 
+  // ========== 播放列表（当前目录视频切换） ==========
+
+  Future<void> _showPlaylist() async {
+    final playlist = widget.playlist;
+    if (playlist == null || playlist.isEmpty) return;
+    _hideTimer?.cancel();
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                '播放列表（${playlist.length}）',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white70,
+                    ),
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white24),
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.55,
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: playlist.length,
+                itemBuilder: (context, i) {
+                  final file = playlist[i];
+                  final selected = i == _playlistIndex;
+                  return ListTile(
+                    leading: Icon(
+                      FileTypeUtils.isVideo(file.name)
+                          ? Icons.movie_outlined
+                          : Icons.folder_outlined,
+                      color: selected ? const Color(0xFFE94560) : Colors.white54,
+                    ),
+                    title: Text(
+                      file.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: selected ? const Color(0xFFE94560) : Colors.white,
+                        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                        fontSize: 14,
+                      ),
+                    ),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      if (i != _playlistIndex) {
+                        _switchVideo(file, i);
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _switchVideo(FileModel file, int index) async {
+    _hideTimer?.cancel();
+    setState(() {
+      _playlistIndex = index;
+      _title = file.name;
+      _controlsVisible = true;
+    });
+    try {
+      await widget.onSwitchVideo?.call(file, player);
+    } catch (e) {
+      if (mounted) {
+        ToastHelper.failure('切换失败：$e');
+        setState(() => _controlsVisible = true);
+      }
+    }
+    _startHideTimer();
+  }
+
+  // ========== 设置菜单（解码方式 / 画面比例 / 小屏） ==========
+
+  void _showSettingsMenu() {
+    _hideTimer?.cancel();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                '设置',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white70,
+                    ),
+              ),
+            ),
+            const Divider(height: 1, color: Colors.white24),
+            // 解码方式
+            ListTile(
+              leading: const Icon(Icons.memory, color: Colors.white70, size: 20),
+              title: const Text(
+                '解码方式',
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              trailing: Text(
+                widget.hwdecMode == 'auto' ? '硬解码' : '软解码',
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _showDecodeMenu();
+              },
+            ),
+            // 画面比例
+            ListTile(
+              leading: const Icon(Icons.aspect_ratio, color: Colors.white70, size: 20),
+              title: const Text(
+                '画面比例',
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              trailing: Text(
+                _aspectLabel(widget.aspectMode),
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _showAspectMenu();
+              },
+            ),
+            // 小屏播放
+            if (widget.onMiniPlayer != null)
+              ListTile(
+                leading: const Icon(Icons.picture_in_picture_alt, color: Colors.white70, size: 20),
+                title: const Text(
+                  '小屏播放',
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  widget.onMiniPlayer!();
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDecodeMenu() {
+    final options = <(String, String)>[
+      ('auto', '硬解码'),
+      ('no', '软解码'),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: options.map((opt) {
+            final selected = widget.hwdecMode == opt.$1;
+            return ListTile(
+              title: Text(
+                opt.$2,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: selected ? const Color(0xFFE94560) : Colors.white,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                if (!selected) widget.onSetHwdec?.call(opt.$1);
+              },
+            );
+          }).toList(),
+          const SizedBox(height: 8),
+        ),
+      ),
+    );
+  }
+
+  void _showAspectMenu() {
+    final options = <(String, String)>[
+      ('original', '原始比例'),
+      ('16:9', '16:9'),
+      ('4:3', '4:3'),
+      ('1:1', '1:1'),
+      ('fill', '拉伸全屏'),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.black87,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: options.map((opt) {
+            final selected = widget.aspectMode == opt.$1;
+            return ListTile(
+              title: Text(
+                opt.$2,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: selected ? const Color(0xFFE94560) : Colors.white,
+                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                if (!selected) widget.onSetAspect?.call(opt.$1);
+              },
+            );
+          }).toList(),
+          const SizedBox(height: 8),
+        ),
+      ),
+    );
+  }
+
+  String _aspectLabel(String mode) {
+    switch (mode) {
+      case '16:9':
+        return '16:9';
+      case '4:3':
+        return '4:3';
+      case '1:1':
+        return '1:1';
+      case 'fill':
+        return '拉伸全屏';
+      default:
+        return '原始比例';
+    }
+  }
+
   // ========== 工具方法 ==========
 
   String _formatDuration(Duration d) {
@@ -833,7 +1133,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
           ),
           Expanded(
             child: Text(
-              widget.title,
+              _title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
@@ -843,6 +1143,12 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               ),
             ),
           ),
+          if (widget.playlist != null && widget.playlist!.length > 1)
+            IconButton(
+              icon: const Icon(Icons.playlist_play, color: Colors.white, size: 20),
+              tooltip: '播放列表',
+              onPressed: _showPlaylist,
+            ),
         ],
       ),
     );
@@ -952,6 +1258,12 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             size: 20,
           ),
           onPressed: _onLockToggle,
+        ),
+        // 设置按钮（解码/画面比例/小屏播放）
+        IconButton(
+          icon: const Icon(Icons.settings, color: Colors.white, size: 20),
+          tooltip: '设置',
+          onPressed: _showSettingsMenu,
         ),
         // 全屏按钮
         IconButton(

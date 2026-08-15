@@ -691,7 +691,12 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
     } else if (FileTypeUtils.isPdf(file.name)) {
       PdfActionMenu.show(context, file);
     } else if (FileTypeUtils.isVideo(file.name)) {
-      Navigator.of(context).pushNamed(RouteNames.videoPreview, arguments: file);
+      final videoIndex = _files.indexWhere((f) => f.id == file.id);
+      Navigator.of(context).pushNamed(RouteNames.videoPreview, arguments: {
+        'file': file,
+        'files': _files,
+        'index': videoIndex < 0 ? 0 : videoIndex,
+      });
     } else if (FileTypeUtils.isAudio(file.name)) {
       Navigator.of(context).pushNamed(
         RouteNames.audioPreview,
