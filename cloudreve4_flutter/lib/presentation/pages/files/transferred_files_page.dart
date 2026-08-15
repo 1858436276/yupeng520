@@ -135,10 +135,13 @@ class _TransferredFilesPageState extends State<TransferredFilesPage> {
     } else if (FileTypeUtils.isPdf(file.name)) {
       PdfActionMenu.show(context, file);
     } else if (FileTypeUtils.isVideo(file.name)) {
-      final videoIndex = _files.indexWhere((f) => f.id == file.id);
+      final videoFiles = _files
+          .where((f) => FileTypeUtils.isVideo(f.name))
+          .toList();
+      final videoIndex = videoFiles.indexWhere((f) => f.id == file.id);
       Navigator.of(context).pushNamed(RouteNames.videoPreview, arguments: {
         'file': file,
-        'files': _files,
+        'files': videoFiles,
         'index': videoIndex < 0 ? 0 : videoIndex,
       });
     } else if (FileTypeUtils.isAudio(file.name)) {

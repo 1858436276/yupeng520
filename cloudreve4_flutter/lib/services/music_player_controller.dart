@@ -19,6 +19,7 @@ class MusicPlayerController extends ChangeNotifier {
   String? _contextHint;
   bool _loading = false;
   String? _error;
+  bool _audioPageVisible = false;
 
   StreamSubscription<void>? _completedSub;
 
@@ -34,6 +35,15 @@ class MusicPlayerController extends ChangeNotifier {
   bool get playing => _player?.state.playing ?? false;
   bool get hasPrev => _playlist.length > 1 && _index > 0;
   bool get hasNext => _playlist.length > 1 && _index < _playlist.length - 1;
+
+  /// 音频预览页是否在导航栈中（用于避免悬浮球重复压栈）。
+  bool get audioPageVisible => _audioPageVisible;
+
+  void setAudioPageVisible(bool visible) {
+    if (_audioPageVisible == visible) return;
+    _audioPageVisible = visible;
+    notifyListeners();
+  }
 
   /// 播放列表，从 [index] 处开始。播放器已存在时切换当前歌曲。
   void play(

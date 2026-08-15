@@ -15,6 +15,9 @@ class AudioPreviewPage extends StatefulWidget {
   final List<FileModel>? files;
   final int initialIndex;
 
+  /// 从悬浮球恢复时置 true：复用当前播放器，不重新加载。
+  final bool resume;
+
   const AudioPreviewPage({
     super.key,
     required this.file,
@@ -22,6 +25,7 @@ class AudioPreviewPage extends StatefulWidget {
     this.contextHint,
     this.files,
     this.initialIndex = 0,
+    this.resume = false,
   });
 
   @override
@@ -32,6 +36,8 @@ class _AudioPreviewPageState extends State<AudioPreviewPage> {
   @override
   void initState() {
     super.initState();
+    MusicPlayerController.instance.setAudioPageVisible(true);
+    if (widget.resume) return;
     final files = (widget.files != null && widget.files!.isNotEmpty)
         ? widget.files!
         : [widget.file];
@@ -42,6 +48,12 @@ class _AudioPreviewPageState extends State<AudioPreviewPage> {
       entityId: widget.entityId,
       contextHint: widget.contextHint,
     );
+  }
+
+  @override
+  void dispose() {
+    MusicPlayerController.instance.setAudioPageVisible(false);
+    super.dispose();
   }
 
   void _retry() {

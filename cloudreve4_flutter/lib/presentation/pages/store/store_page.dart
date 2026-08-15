@@ -425,6 +425,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
       context: context,
       showDragHandle: true,
       useSafeArea: true,
+      isScrollControlled: true,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -432,94 +433,96 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
             final credit = ctx.read<UserSettingProvider>().settings?.credit ?? 0;
 
             return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '确认购买',
-                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    const SizedBox(height: 12),
-                    _PurchaseSummary(product: product, payment: config.payment),
-                    if (config.pointEnabled) ...[
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '确认购买',
+                        style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
                       const SizedBox(height: 12),
-                      _buildPointsBalance(ctx, credit, product.points),
-                    ],
-                    if (providers.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        '支付方式',
-                        style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      RadioGroup<StorePaymentProvider>(
-                        groupValue: selectedProvider,
-                        onChanged: (value) => setSheetState(() {
-                          selectedProvider = value;
-                        }),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: providers.map(
-                            (provider) => RadioListTile<StorePaymentProvider>(
-                              value: provider,
-                              title: Text(provider.name),
-                              subtitle: Text(provider.type == 'points'
-                                  ? '使用站内积分购买'
-                                  : provider.type),
-                            ),
-                          ).toList(),
+                      _PurchaseSummary(product: product, payment: config.payment),
+                      if (config.pointEnabled) ...[
+                        const SizedBox(height: 12),
+                        _buildPointsBalance(ctx, credit, product.points),
+                      ],
+                      if (providers.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          '支付方式',
+                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
-                      ),
-                    ] else ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        config.pointEnabled
-                            ? '当前没有第三方支付方式，将尝试使用积分/站内余额购买。'
-                            : '当前没有第三方支付方式。免费商品可直接领取；付费商品需要站点配置支付方式。',
-                        style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(ctx).hintColor,
-                            ),
-                      ),
-                    ],
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.of(ctx).pop(false),
-                            child: const Text('取消'),
+                        const SizedBox(height: 8),
+                        RadioGroup<StorePaymentProvider>(
+                          groupValue: selectedProvider,
+                          onChanged: (value) => setSheetState(() {
+                            selectedProvider = value;
+                          }),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: providers.map(
+                              (provider) => RadioListTile<StorePaymentProvider>(
+                                value: provider,
+                                title: Text(provider.name),
+                                subtitle: Text(provider.type == 'points'
+                                    ? '使用站内积分购买'
+                                    : provider.type),
+                              ),
+                            ).toList(),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () {
-                              final usePoints = selectedProvider?.type == 'points';
-                              if (usePoints &&
-                                  product.points != null &&
-                                  credit < product.points!) {
-                                ToastHelper.failure(
-                                  '积分不足，当前 $credit 积分，需要 ${product.points!} 积分',
-                                );
-                                return;
-                              }
-                              Navigator.of(ctx).pop(true);
-                            },
-                            child: Text(product.price == 0 ? '领取' : '购买'),
-                          ),
+                      ] else ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          config.pointEnabled
+                              ? '当前没有第三方支付方式，将尝试使用积分/站内余额购买。'
+                              : '当前没有第三方支付方式。免费商品可直接领取；付费商品需要站点配置支付方式。',
+                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(ctx).hintColor,
+                              ),
                         ),
                       ],
-                    ),
-                    // ✅ 新增底部间距，避开导航栏
-                    SizedBox(height: MediaQuery.of(ctx).padding.bottom + 8),
-                  ],
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('取消'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () {
+                                final usePoints = selectedProvider?.type == 'points';
+                                if (usePoints &&
+                                    product.points != null &&
+                                    credit < product.points!) {
+                                  ToastHelper.failure(
+                                    '积分不足，当前 $credit 积分，需要 ${product.points!} 积分',
+                                  );
+                                  return;
+                                }
+                                Navigator.of(ctx).pop(true);
+                              },
+                              child: Text(product.price == 0 ? '领取' : '购买'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // ✅ 新增底部间距，避开导航栏
+                      SizedBox(height: MediaQuery.of(ctx).padding.bottom + 8),
+                      ],
+                  ),
                 ),
               ),
             );
@@ -586,6 +589,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
       context: context,
       showDragHandle: true,
       useSafeArea: true,
+      isScrollControlled: true,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -593,94 +597,96 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
             final credit = ctx.read<UserSettingProvider>().settings?.credit ?? 0;
 
             return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '确认购买',
-                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
-                    ),
-                    const SizedBox(height: 12),
-                    _GroupPurchaseSummary(product: product, payment: config.payment),
-                    if (config.pointEnabled) ...[
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 8, 18, 18),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '确认购买',
+                        style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
                       const SizedBox(height: 12),
-                      _buildPointsBalance(ctx, credit, product.points),
-                    ],
-                    if (providers.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        '支付方式',
-                        style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                      ),
-                      const SizedBox(height: 8),
-                      RadioGroup<StorePaymentProvider>(
-                        groupValue: selectedProvider,
-                        onChanged: (value) => setSheetState(() {
-                          selectedProvider = value;
-                        }),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: providers.map(
-                            (provider) => RadioListTile<StorePaymentProvider>(
-                              value: provider,
-                              title: Text(provider.name),
-                              subtitle: Text(provider.type == 'points'
-                                  ? '使用站内积分购买'
-                                  : provider.type),
-                            ),
-                          ).toList(),
+                      _GroupPurchaseSummary(product: product, payment: config.payment),
+                      if (config.pointEnabled) ...[
+                        const SizedBox(height: 12),
+                        _buildPointsBalance(ctx, credit, product.points),
+                      ],
+                      if (providers.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          '支付方式',
+                          style: Theme.of(ctx).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
                         ),
-                      ),
-                    ] else ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        config.pointEnabled
-                            ? '当前没有第三方支付方式，将尝试使用积分/站内余额购买。'
-                            : '当前没有第三方支付方式。免费商品可直接领取；付费商品需要站点配置支付方式。',
-                        style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(ctx).hintColor,
-                            ),
-                      ),
-                    ],
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: () => Navigator.of(ctx).pop(false),
-                            child: const Text('取消'),
+                        const SizedBox(height: 8),
+                        RadioGroup<StorePaymentProvider>(
+                          groupValue: selectedProvider,
+                          onChanged: (value) => setSheetState(() {
+                            selectedProvider = value;
+                          }),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: providers.map(
+                              (provider) => RadioListTile<StorePaymentProvider>(
+                                value: provider,
+                                title: Text(provider.name),
+                                subtitle: Text(provider.type == 'points'
+                                    ? '使用站内积分购买'
+                                    : provider.type),
+                              ),
+                            ).toList(),
                           ),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: FilledButton(
-                            onPressed: () {
-                              final usePoints = selectedProvider?.type == 'points';
-                              if (usePoints &&
-                                  product.points != null &&
-                                  credit < product.points!) {
-                                ToastHelper.failure(
-                                  '积分不足，当前 $credit 积分，需要 ${product.points!} 积分',
-                                );
-                                return;
-                              }
-                              Navigator.of(ctx).pop(true);
-                            },
-                            child: Text(product.price == 0 ? '领取' : '购买'),
-                          ),
+                      ] else ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          config.pointEnabled
+                              ? '当前没有第三方支付方式，将尝试使用积分/站内余额购买。'
+                              : '当前没有第三方支付方式。免费商品可直接领取；付费商品需要站点配置支付方式。',
+                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(ctx).hintColor,
+                              ),
                         ),
                       ],
-                    ),
-                    // ✅ 新增底部间距，避开导航栏
-                    SizedBox(height: MediaQuery.of(ctx).padding.bottom + 8),
-                  ],
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: const Text('取消'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () {
+                                final usePoints = selectedProvider?.type == 'points';
+                                if (usePoints &&
+                                    product.points != null &&
+                                    credit < product.points!) {
+                                  ToastHelper.failure(
+                                    '积分不足，当前 $credit 积分，需要 ${product.points!} 积分',
+                                  );
+                                  return;
+                                }
+                                Navigator.of(ctx).pop(true);
+                              },
+                              child: Text(product.price == 0 ? '领取' : '购买'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      // ✅ 新增底部间距，避开导航栏
+                      SizedBox(height: MediaQuery.of(ctx).padding.bottom + 8),
+                      ],
+                  ),
                 ),
               ),
             );
