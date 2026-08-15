@@ -424,6 +424,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
@@ -584,6 +585,7 @@ class _StorePageState extends State<StorePage> with SingleTickerProviderStateMix
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       showDragHandle: true,
+      useSafeArea: true,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
