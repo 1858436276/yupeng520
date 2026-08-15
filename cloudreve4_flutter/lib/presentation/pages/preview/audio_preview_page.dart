@@ -1,20 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import '../../../data/models/file_model.dart';
-import '../../../services/file_service.dart';
+import '../../../services/music_player_controller.dart';
 import '../../widgets/thumbnail_image.dart';
 
-/// 音频预览页面
+/// 音频预览页面：播放器由全局 MusicPlayerController 管理，
+/// 退出本页后音乐继续播放并弹出悬浮播放球。
 class AudioPreviewPage extends StatefulWidget {
   final FileModel file;
   final String? entityId;
   final String? contextHint;
+
+  /// 当前目录音频列表（用于上一首/下一首）
+  final List<FileModel>? files;
+  final int initialIndex;
 
   const AudioPreviewPage({
     super.key,
     required this.file,
     this.entityId,
     this.contextHint,
+    this.files,
+    this.initialIndex = 0,
   });
 
   @override
@@ -22,58 +29,31 @@ class AudioPreviewPage extends StatefulWidget {
 }
 
 class _AudioPreviewPageState extends State<AudioPreviewPage> {
-  late final Player player;
-  bool _isLoading = true;
-  String? _errorMessage;
-
   @override
   void initState() {
     super.initState();
-    player = Player();
-    _loadAudioUrl();
+    final files = (widget.files != null && widget.files!.isNotEmpty)
+        ? widget.files!
+        : [widget.file];
+    final index = widget.initialIndex.clamp(0, files.length - 1);
+    MusicPlayerController.instance.play(
+      files,
+      index,
+      entityId: widget.entityId,
+      contextHint: widget.contextHint,
+    );
   }
 
-  Future<void> _loadAudioUrl() async {
-    try {
-      final response = await FileService().getDownloadUrls(
-        uris: [widget.file.relativePath],
-        download: false,
-        entity: widget.entityId,
-      );
-
-      final urls = response['urls'] as List<dynamic>? ?? [];
-      if (urls.isNotEmpty) {
-        final urlData = urls[0] as Map<String, dynamic>;
-        final url = urlData['url'] as String;
-
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-          });
-          player.open(Media(url), play: true);
-        }
-      } else {
-        if (mounted) {
-          setState(() {
-            _errorMessage = '无法获取音频URL';
-            _isLoading = false;
-          });
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = e.toString();
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    player.dispose();
-    super.dispose();
+  void _retry() {
+    final files = (widget.files != null && widget.files!.isNotEmpty)
+        ? widget.files!
+        : [widget.file];
+    MusicPlayerController.instance.play(
+      files,
+      widget.initialIndex.clamp(0, files.length - 1),
+      entityId: widget.entityId,
+      contextHint: widget.contextHint,
+    );
   }
 
   @override
@@ -95,54 +75,46 @@ class _AudioPreviewPageState extends State<AudioPreviewPage> {
           fontWeight: FontWeight.w500,
         ),
       ),
-      body: _buildBody(),
-    );
-  }
-
-  Widget _buildBody() {
-    if (_isLoading) {
-      return const Center(
-        child: CircularProgressIndicator(color: Colors.white),
-      );
-    }
-
-    if (_errorMessage != null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.white54,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white54),
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: () {
-                setState(() {
-                  _isLoading = true;
-                  _errorMessage = null;
-                });
-                _loadAudioUrl();
-              },
-              child: const Text('重试'),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return AudioPlayerWidget(
-      player: player,
-      fileName: widget.file.name,
-      file: widget.file,
-      contextHint: widget.contextHint,
+      body: ListenableBuilder(
+        listenable: MusicPlayerController.instance,
+        builder: (context, _) {
+          final controller = MusicPlayerController.instance;
+          final player = controller.player;
+          final current = controller.current;
+          if (controller.loading || player == null || current == null) {
+            return const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            );
+          }
+          if (controller.error != null) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, size: 64, color: Colors.white54),
+                  const SizedBox(height: 16),
+                  Text(
+                    controller.error!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _retry,
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
+            );
+          }
+          return AudioPlayerWidget(
+            player: player,
+            fileName: current.name,
+            file: current,
+            contextHint: widget.contextHint,
+          );
+        },
+      ),
     );
   }
 }
@@ -167,7 +139,6 @@ class AudioPlayerWidget extends StatefulWidget {
 }
 
 class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -342,19 +313,20 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
   Widget _buildPlaybackControls() {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 400;
+    final controller = MusicPlayerController.instance;
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: isSmallScreen ? 8 : 16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // 上一首（暂无功能）
+          // 上一首
           Flexible(
             child: IconButton(
               icon: const Icon(Icons.skip_previous),
               iconSize: isSmallScreen ? 28 : 36,
               color: Colors.white,
-              onPressed: () {},
+              onPressed: controller.hasPrev ? controller.prev : null,
             ),
           ),
 
@@ -394,13 +366,7 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
                   icon: Icon(playing ? Icons.pause : Icons.play_arrow),
                   iconSize: isSmallScreen ? 28 : 36,
                   color: Colors.white,
-                  onPressed: () {
-                    if (playing) {
-                      widget.player.pause();
-                    } else {
-                      widget.player.play();
-                    }
-                  },
+                  onPressed: controller.toggle,
                 ),
               );
             },
@@ -419,13 +385,13 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
             ),
           ),
 
-          // 下一首（暂无功能）
+          // 下一首
           Flexible(
             child: IconButton(
               icon: const Icon(Icons.skip_next),
               iconSize: isSmallScreen ? 28 : 36,
               color: Colors.white,
-              onPressed: () {},
+              onPressed: controller.hasNext ? controller.next : null,
             ),
           ),
         ],

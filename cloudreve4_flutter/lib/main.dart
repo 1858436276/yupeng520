@@ -44,6 +44,7 @@ import 'services/global_shortcuts_service.dart';
 import 'router/app_router.dart';
 import 'services/app_update_service.dart';
 import 'presentation/widgets/toast_helper.dart';
+import 'presentation/widgets/mini_music_player_overlay.dart';
 import 'src/rust/frb_generated.dart' show RustSyncApi;
 
 class _CloudreveDirectHttpOverrides extends HttpOverrides {
@@ -403,7 +404,14 @@ class AppView extends StatelessWidget {
 
           return AnnotatedRegion<SystemUiOverlayStyle>(
             value: overlayStyle,
-            child: wrapped,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                wrapped,
+                // 全局音乐悬浮播放球（退出播放页后继续播放）
+                const MiniMusicPlayerOverlay(),
+              ],
+            ),
           );
         },
       ),

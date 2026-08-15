@@ -1814,9 +1814,22 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
         context,
         listen: false,
       ).contextHint;
+      final allFiles = Provider.of<FileManagerProvider>(
+        context,
+        listen: false,
+      ).files;
+      final audioFiles = allFiles
+          .where((f) => FileTypeUtils.isAudio(f.name))
+          .toList();
+      final audioIndex = audioFiles.indexWhere((f) => f.id == file.id);
       Navigator.of(context).pushNamed(
         RouteNames.audioPreview,
-        arguments: {'file': file, 'contextHint': contextHint},
+        arguments: {
+          'file': file,
+          'contextHint': contextHint,
+          'files': audioFiles,
+          'index': audioIndex < 0 ? 0 : audioIndex,
+        },
       );
     } else if (FileTypeUtils.isMarkdown(file.name)) {
       TextActionMenu.show(

@@ -142,9 +142,18 @@ class _TransferredFilesPageState extends State<TransferredFilesPage> {
         'index': videoIndex < 0 ? 0 : videoIndex,
       });
     } else if (FileTypeUtils.isAudio(file.name)) {
+      final audioFiles = _files
+          .where((f) => FileTypeUtils.isAudio(f.name))
+          .toList();
+      final audioIndex = audioFiles.indexWhere((f) => f.id == file.id);
       Navigator.of(context).pushNamed(
         RouteNames.audioPreview,
-        arguments: {'file': file, 'contextHint': _contextHint},
+        arguments: {
+          'file': file,
+          'contextHint': _contextHint,
+          'files': audioFiles,
+          'index': audioIndex < 0 ? 0 : audioIndex,
+        },
       );
     } else if (FileTypeUtils.isMarkdown(file.name)) {
       Navigator.of(context).pushNamed(RouteNames.markdownPreview, arguments: file);

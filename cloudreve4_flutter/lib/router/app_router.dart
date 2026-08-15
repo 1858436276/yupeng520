@@ -207,6 +207,8 @@ class AppRouter {
               file: args['file'] as FileModel,
               entityId: args['entityId'] as String?,
               contextHint: args['contextHint'] as String?,
+              files: args['files'] as List<FileModel>?,
+              initialIndex: (args['index'] as int?) ?? 0,
             ),
           );
         }
