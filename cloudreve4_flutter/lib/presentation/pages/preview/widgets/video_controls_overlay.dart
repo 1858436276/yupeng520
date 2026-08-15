@@ -787,24 +787,26 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: options.map((opt) {
-            final selected = widget.hwdecMode == opt.$1;
-            return ListTile(
-              title: Text(
-                opt.$2,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: selected ? const Color(0xFFE94560) : Colors.white,
-                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+          children: [
+            ...options.map((opt) {
+              final selected = widget.hwdecMode == opt.$1;
+              return ListTile(
+                title: Text(
+                  opt.$2,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: selected ? const Color(0xFFE94560) : Colors.white,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                  ),
                 ),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                if (!selected) widget.onSetHwdec?.call(opt.$1);
-              },
-            );
-          }).toList(),
-          const SizedBox(height: 8),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (!selected) widget.onSetHwdec?.call(opt.$1);
+                },
+              );
+            }).toList(),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
@@ -827,24 +829,26 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       builder: (ctx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: options.map((opt) {
-            final selected = widget.aspectMode == opt.$1;
-            return ListTile(
-              title: Text(
-                opt.$2,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: selected ? const Color(0xFFE94560) : Colors.white,
-                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+          children: [
+            ...options.map((opt) {
+              final selected = widget.aspectMode == opt.$1;
+              return ListTile(
+                title: Text(
+                  opt.$2,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: selected ? const Color(0xFFE94560) : Colors.white,
+                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                  ),
                 ),
-              ),
-              onTap: () {
-                Navigator.of(ctx).pop();
-                if (!selected) widget.onSetAspect?.call(opt.$1);
-              },
-            );
-          }).toList(),
-          const SizedBox(height: 8),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  if (!selected) widget.onSetAspect?.call(opt.$1);
+                },
+              );
+            }).toList(),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );

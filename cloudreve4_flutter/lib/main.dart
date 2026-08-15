@@ -45,6 +45,7 @@ import 'router/app_router.dart';
 import 'services/app_update_service.dart';
 import 'presentation/widgets/toast_helper.dart';
 import 'presentation/widgets/mini_music_player_overlay.dart';
+import 'presentation/widgets/mini_video_window.dart';
 import 'src/rust/frb_generated.dart' show RustSyncApi;
 
 class _CloudreveDirectHttpOverrides extends HttpOverrides {
@@ -410,6 +411,8 @@ class AppView extends StatelessWidget {
                 wrapped,
                 // 全局音乐悬浮播放球（退出播放页后继续播放）
                 const MiniMusicPlayerOverlay(),
+                // 全局视频小屏播放窗
+                const MiniVideoWindow(),
               ],
             ),
           );

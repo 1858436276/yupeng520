@@ -3,6 +3,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../../../data/models/file_model.dart';
 import '../../../services/file_service.dart';
+import '../../../services/mini_video_controller.dart';
 import 'widgets/video_controls_overlay.dart';
 
 /// 视频预览页面
@@ -14,12 +15,16 @@ class VideoPreviewPage extends StatefulWidget {
   final List<FileModel>? files;
   final int initialIndex;
 
+  /// 从视频小窗恢复全屏时复用既有播放器/控制器
+  final VideoController? existingController;
+
   const VideoPreviewPage({
     super.key,
     required this.file,
     this.entityId,
     this.files,
     this.initialIndex = 0,
+    this.existingController,
   });
 
   @override
@@ -42,14 +47,33 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
   @override
   void initState() {
     super.initState();
-    player = Player();
-    controller = VideoController(player);
+    if (widget.existingController != null) {
+      controller = widget.existingController!;
+      player = controller.player;
+    } else {
+      player = Player();
+      controller = VideoController(player);
+    }
     _videos = (widget.files != null && widget.files!.isNotEmpty)
         ? widget.files!
         : [widget.file];
     _index = widget.initialIndex.clamp(0, _videos.length - 1);
     // 横竖屏识别、方向锁定、默认全屏由 VideoControlsOverlay 统一管理
     _loadVideoUrl();
+  }
+
+  /// 切换到小屏播放：接管播放器，退出当前预览页继续播放
+  void _enterMiniPlayer() {
+    final mini = MiniVideoController.instance;
+    mini.enterMini(
+      videoController: controller,
+      player: player,
+      files: _videos,
+      index: _index,
+      entityId: widget.entityId,
+      title: _videos[_index].name,
+    );
+    Navigator.of(context).pop();
   }
 
   Future<void> _openFile(FileModel file) async {
@@ -95,28 +119,38 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
 
   void _setAspect(String mode) {
     setState(() => _aspectMode = mode);
-    // fill/original 交给 Video 组件 BoxFit 处理；固定比例用 mpv 属性
-    player.setProperty(
-      'video-aspect-override',
-      (mode == 'fill' || mode == 'original') ? '-1' : mode,
-    );
+    // 画面比例由 Video 组件的 aspectRatio + BoxFit 控制
   }
 
-  void _setHwdec(String mode) {
+  Future<void> _setHwdec(String mode) async {
     setState(() => _hwdec = mode);
-    player.setProperty('hwdec', mode);
-    _reload(player);
+    // media_kit 1.2.6 未在 Player 上公开 setProperty，改由 VideoController
+    // 的平台实现设置 mpv hwdec 属性（Native/Android 实现均提供该方法）。
+    try {
+      final vc = await controller.platform.future;
+      await (vc as dynamic).setProperty('hwdec', mode);
+    } catch (_) {}
+    await _reload(player);
   }
 
   @override
   void dispose() {
-    player.dispose();
+    // 若播放器已转交小屏播放，由小窗负责销毁
+    if (MiniVideoController.instance.player != player) {
+      player.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final fit = _aspectMode == 'fill' ? BoxFit.fill : BoxFit.contain;
+    final aspectRatio = switch (_aspectMode) {
+      '16:9' => 16 / 9,
+      '4:3' => 4 / 3,
+      '1:1' => 1.0,
+      _ => null,
+    };
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -152,6 +186,7 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
                   child: Video(
                     controller: controller,
                     fit: fit,
+                    aspectRatio: aspectRatio,
                     controls: (state) => VideoControlsOverlay(
                       state: state,
                       title: _videos[_index].name,
@@ -163,6 +198,7 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
                       onSetAspect: _setAspect,
                       hwdecMode: _hwdec,
                       onSetHwdec: _setHwdec,
+                      onMiniPlayer: _enterMiniPlayer,
                     ),
                   ),
                 ),

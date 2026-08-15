@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../presentation/pages/auth/login_page.dart';
 import '../presentation/pages/auth/login_page_desktop.dart';
 import '../presentation/pages/shell/app_shell.dart';
@@ -189,6 +190,7 @@ class AppRouter {
               entityId: args['entityId'] as String?,
               files: args['files'] as List<FileModel>?,
               initialIndex: (args['index'] as int?) ?? 0,
+              existingController: args['existingController'] as VideoController?,
             ),
           );
         }
