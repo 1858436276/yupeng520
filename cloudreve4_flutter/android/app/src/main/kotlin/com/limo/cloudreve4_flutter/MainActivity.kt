@@ -12,7 +12,7 @@ import android.provider.OpenableColumns
 import android.provider.Settings
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
@@ -23,7 +23,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
 
-class MainActivity : FlutterActivity() {
+class MainActivity : AudioServiceActivity() {
     private val contentReaderChannel = "cloudreve/content_reader"
     private val appUpdateChannel = "cloudreve/app_update"
     private val pickFilesRequestCode = 46110
