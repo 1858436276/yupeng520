@@ -44,10 +44,14 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
   bool _isLoading = true;
   String? _errorMessage;
 
+  /// 播放器是否已转交小屏播放（转交后由小窗负责销毁）
+  bool _transferredToMini = false;
+
   @override
   void initState() {
     super.initState();
-    if (widget.existingController != null) {
+    final useExisting = widget.existingController != null;
+    if (useExisting) {
       controller = widget.existingController!;
       player = controller.player;
     } else {
@@ -58,12 +62,18 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
         ? widget.files!
         : [widget.file];
     _index = widget.initialIndex.clamp(0, _videos.length - 1);
-    // 横竖屏识别、方向锁定、默认全屏由 VideoControlsOverlay 统一管理
-    _loadVideoUrl();
+    if (useExisting) {
+      // 从小窗恢复：复用当前播放状态，不重新加载媒体
+      _isLoading = false;
+    } else {
+      // 横竖屏识别、方向锁定、默认全屏由 VideoControlsOverlay 统一管理
+      _loadVideoUrl();
+    }
   }
 
   /// 切换到小屏播放：接管播放器，退出当前预览页继续播放
   void _enterMiniPlayer() {
+    _transferredToMini = true;
     final mini = MiniVideoController.instance;
     mini.enterMini(
       videoController: controller,
@@ -135,8 +145,8 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
 
   @override
   void dispose() {
-    // 若播放器已转交小屏播放，由小窗负责销毁
-    if (MiniVideoController.instance.player != player) {
+    // 播放器转交小窗后由小窗负责销毁；未转交时本页负责销毁
+    if (!_transferredToMini) {
       player.dispose();
     }
     super.dispose();
