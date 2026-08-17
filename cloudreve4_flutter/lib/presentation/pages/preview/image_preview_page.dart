@@ -68,7 +68,7 @@ class _ImagePreviewPageState extends State<ImagePreviewPage>
     super.initState();
     _images = (widget.files != null && widget.files!.isNotEmpty)
         ? widget.files!
-        : [_currentFile];
+        : [widget.file];
     _index = widget.initialIndex.clamp(0, _images.length - 1);
     _zoomController = AnimationController(
       vsync: this,
