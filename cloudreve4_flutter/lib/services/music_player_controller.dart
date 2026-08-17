@@ -140,6 +140,25 @@ class MusicPlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void play() {
+    final player = _player;
+    if (player == null || player.state.playing) return;
+    player.play();
+    notifyListeners();
+  }
+
+  void pause() {
+    final player = _player;
+    if (player == null || !player.state.playing) return;
+    player.pause();
+    notifyListeners();
+  }
+
+  Future<void> seek(Duration position) async {
+    await _player?.seek(position);
+    notifyListeners();
+  }
+
   /// 真正退出：销毁播放器并清空状态。
   void stop() {
     _playVersion++;

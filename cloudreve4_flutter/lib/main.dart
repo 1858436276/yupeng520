@@ -33,11 +33,14 @@ import 'services/task_database.dart';
 import 'data/models/upload_task_model.dart';
 import 'data/models/download_task_model.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:audio_service/audio_service.dart';
 import 'services/api_service.dart';
 import 'services/server_service.dart';
 import 'services/cache_manager_service.dart';
 import 'services/avatar_cache_service.dart';
 import 'services/site_brand_cache_service.dart';
+import 'services/music_audio_handler.dart';
+import 'services/music_player_controller.dart';
 import 'core/utils/video_fullscreen.dart';
 import 'services/desktop_service.dart';
 import 'services/global_shortcuts_service.dart';
@@ -263,6 +266,19 @@ void main() async {
 
   // Android 13+：请求通知权限，避免上传/下载进度通知无法显示。
   await AndroidCompatService.initialize();
+
+  // 初始化音频播放媒体会话（通知栏播放器：封面/歌名/上一首/下一首）。
+  if (Platform.isAndroid || Platform.isIOS) {
+    await AudioService.init(
+      builder: () => MusicPlayerAudioHandler(MusicPlayerController.instance),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.qyupeng.cloudreve.music',
+        androidNotificationChannelName: '音乐播放',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+      ),
+    );
+  }
 
   // 初始化上传前台服务配置（Android 后台上传通知）。
   await UploadForegroundService.initialize();

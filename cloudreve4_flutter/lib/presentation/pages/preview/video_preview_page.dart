@@ -4,6 +4,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../../data/models/file_model.dart';
 import '../../../services/file_service.dart';
 import '../../../services/mini_video_controller.dart';
+import '../../widgets/toast_helper.dart';
 import 'widgets/video_controls_overlay.dart';
 
 /// 视频预览页面
@@ -47,6 +48,9 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
   /// 播放器是否已转交小屏播放（转交后由小窗负责销毁）
   bool _transferredToMini = false;
 
+  /// 切换视频中（网络慢时旧视频继续播放，同时显示加载遮罩）
+  bool _switching = false;
+
   @override
   void initState() {
     super.initState();
@@ -86,19 +90,38 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
     Navigator.of(context).pop();
   }
 
-  Future<void> _openFile(FileModel file) async {
-    final response = await FileService().getDownloadUrls(
-      uris: [file.relativePath],
-      download: false,
-      entity: widget.entityId,
-    );
-
-    final urls = response['urls'] as List<dynamic>? ?? [];
-    if (urls.isEmpty) {
-      throw Exception('无法获取视频URL');
+  Future<void> _openFile(FileModel file, {bool isSwitch = false}) async {
+    if (mounted) {
+      setState(() {
+        if (isSwitch) _switching = true;
+        _errorMessage = null;
+      });
     }
-    final url = (urls[0] as Map<String, dynamic>)['url'] as String;
-    await player.open(Media(url), play: true);
+    try {
+      final response = await FileService().getDownloadUrls(
+        uris: [file.relativePath],
+        download: false,
+        entity: widget.entityId,
+      );
+
+      final urls = response['urls'] as List<dynamic>? ?? [];
+      if (urls.isEmpty) {
+        throw Exception('无法获取视频URL');
+      }
+      final url = (urls[0] as Map<String, dynamic>)['url'] as String;
+      await player.open(Media(url), play: true);
+    } catch (e) {
+      if (mounted) {
+        if (isSwitch) {
+          // 切换失败：保留旧视频继续播放，仅提示用户
+          ToastHelper.error('视频加载失败，请重试');
+        } else {
+          setState(() => _errorMessage = e.toString());
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _switching = false);
+    }
   }
 
   Future<void> _loadVideoUrl() async {
@@ -121,7 +144,7 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
     final position = p.state.position;
     final rate = p.state.rate;
     try {
-      await _openFile(_videos[_index]);
+      await _openFile(_videos[_index], isSwitch: true);
       await p.seek(position);
       await p.setRate(rate);
     } catch (_) {}
@@ -193,23 +216,49 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
                   ),
                 )
               : ExcludeSemantics(
-                  child: Video(
-                    controller: controller,
-                    fit: fit,
-                    aspectRatio: aspectRatio,
-                    controls: (state) => VideoControlsOverlay(
-                      state: state,
-                      title: _videos[_index].name,
-                      playlist: _videos,
-                      playlistIndex: _index,
-                      onSwitchVideo: (file, p) => _openFile(file),
-                      onReload: _reload,
-                      aspectMode: _aspectMode,
-                      onSetAspect: _setAspect,
-                      hwdecMode: _hwdec,
-                      onSetHwdec: _setHwdec,
-                      onMiniPlayer: _enterMiniPlayer,
-                    ),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Video(
+                        controller: controller,
+                        fit: fit,
+                        aspectRatio: aspectRatio,
+                        controls: (state) => VideoControlsOverlay(
+                          state: state,
+                          title: _videos[_index].name,
+                          playlist: _videos,
+                          playlistIndex: _index,
+                          onSwitchVideo: (file, p) =>
+                              _openFile(file, isSwitch: true),
+                          onReload: _reload,
+                          aspectMode: _aspectMode,
+                          onSetAspect: _setAspect,
+                          hwdecMode: _hwdec,
+                          onSetHwdec: _setHwdec,
+                          onMiniPlayer: _enterMiniPlayer,
+                        ),
+                      ),
+                      if (_switching)
+                        const ColoredBox(
+                          color: Colors.black45,
+                          child: Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                CircularProgressIndicator(color: Colors.white),
+                                SizedBox(height: 10),
+                                Text(
+                                  '正在切换视频…',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ),
     );
