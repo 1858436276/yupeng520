@@ -682,11 +682,14 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
 
   void _openFile(BuildContext context, FileModel file) {
     if (FileTypeUtils.isImage(file.name)) {
-      final index = _files.indexWhere((f) => f.id == file.id);
+      final imageFiles = _files
+          .where((f) => FileTypeUtils.isImage(f.name))
+          .toList();
+      final imageIndex = imageFiles.indexWhere((f) => f.id == file.id);
       Navigator.of(context).pushNamed(RouteNames.imagePreview, arguments: {
         'file': file,
-        'files': _files,
-        'index': index < 0 ? 0 : index,
+        'files': imageFiles,
+        'index': imageIndex < 0 ? 0 : imageIndex,
       });
     } else if (FileTypeUtils.isPdf(file.name)) {
       PdfActionMenu.show(context, file);
