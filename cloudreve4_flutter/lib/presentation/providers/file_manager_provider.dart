@@ -793,7 +793,12 @@ class FileManagerProvider extends ChangeNotifier {
       final pagination = response['pagination'] as Map<String, dynamic>?;
       setState(() {
         _files = updatedFiles;
-        _applyPagination(pagination, preservePage: true, loadedCount: newFiles.length);
+        // 下拉刷新后重置分页状态，避免 offset 分页从错误的页码继续加载
+        _nextPageToken = null;
+        _currentPage = 0;
+        _totalItems = 0;
+        _useOffsetPagination = false;
+        _applyPagination(pagination, loadedCount: newFiles.length);
         _contextHint = response['context_hint'] as String?;
       });
 

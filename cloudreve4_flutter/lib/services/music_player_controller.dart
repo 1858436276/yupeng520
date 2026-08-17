@@ -27,6 +27,7 @@ class MusicPlayerController extends ChangeNotifier {
   int _loadSeq = 0;
 
   StreamSubscription<void>? _completedSub;
+  StreamSubscription<bool>? _playingSub;
 
   Player? get player => _player;
   FileModel? get current => _current;
@@ -113,6 +114,11 @@ class MusicPlayerController extends ChangeNotifier {
         if (_playlist.length > 1) next();
       });
     });
+    // 订阅 playing 流：系统暂停/恢复等异步状态变化时同步通知栏按钮
+    _playingSub?.cancel();
+    _playingSub = _player?.stream.playing.listen((_) {
+      notifyListeners();
+    });
   }
 
   Future<void> next() async {
@@ -134,16 +140,30 @@ class MusicPlayerController extends ChangeNotifier {
     if (player == null) return;
     if (player.state.playing) {
       player.pause();
+    } else if (player.state.completed) {
+      _playFromStartIfCompleted(player);
     } else {
       player.play();
     }
     notifyListeners();
   }
 
+  /// 播放完毕（completed）状态下 play() 不会恢复，需先回到开头再播放。
+  void _playFromStartIfCompleted(Player player) {
+    if (player.state.completed) {
+      // 异步 seek 后再 play，避免 completed 状态直接 play 无效
+      player.seek(Duration.zero).then((_) => player.play());
+    }
+  }
+
   void resumePlay() {
     final player = _player;
-    if (player == null || player.state.playing) return;
-    player.play();
+    if (player == null) return;
+    if (player.state.completed) {
+      _playFromStartIfCompleted(player);
+    } else {
+      player.play();
+    }
     notifyListeners();
   }
 
@@ -164,6 +184,8 @@ class MusicPlayerController extends ChangeNotifier {
     _playVersion++;
     _completedSub?.cancel();
     _completedSub = null;
+    _playingSub?.cancel();
+    _playingSub = null;
     _player?.dispose();
     _player = null;
     _current = null;
