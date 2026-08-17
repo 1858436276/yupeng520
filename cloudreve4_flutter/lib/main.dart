@@ -308,6 +308,7 @@ void main() async {
 
 /// 初始化音频播放媒体会话（通知栏播放器：封面/歌名/上一首/下一首）。
 /// 首帧后异步执行；失败仅降级通知栏功能，不影响应用启动。
+/// 不使用超时：避免慢速设备上服务绑定被误杀导致通知栏播放器不可用。
 Future<void> _initAudioService() async {
   try {
     await AudioService.init(
@@ -318,7 +319,8 @@ Future<void> _initAudioService() async {
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: true,
       ),
-    ).timeout(const Duration(seconds: 5));
+    );
+    AppLogger.i('AudioService.init 成功，通知栏播放器已就绪');
   } catch (e) {
     AppLogger.e('AudioService.init 失败，通知栏播放器不可用: $e');
   }

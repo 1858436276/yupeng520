@@ -1,4 +1,5 @@
 import 'package:audio_service/audio_service.dart';
+import '../../core/utils/app_logger.dart';
 import '../../data/models/file_model.dart';
 import 'music_player_controller.dart';
 import 'thumbnail_service.dart';
@@ -30,19 +31,24 @@ class MusicPlayerAudioHandler extends BaseAudioHandler with SeekHandler {
       artist: 'Cloudreve',
     ));
     _updateArtwork(current);
+    final playing = _controller.playing;
     playbackState.add(playbackState.value.copyWith(
       controls: [
         MediaControl.skipToPrevious,
-        _controller.playing ? MediaControl.pause : MediaControl.play,
+        playing ? MediaControl.pause : MediaControl.play,
         MediaControl.skipToNext,
       ],
       systemActions: const {MediaAction.seek},
       processingState: _controller.loading
           ? AudioProcessingState.loading
           : AudioProcessingState.ready,
-      playing: _controller.playing,
+      playing: playing,
       updatePosition: _controller.player?.state.position ?? Duration.zero,
     ));
+    AppLogger.i(
+      '媒体会话同步: ${current.name} playing=$playing '
+      'loading=${_controller.loading}',
+    );
   }
 
   Future<void> _updateArtwork(FileModel file) async {
