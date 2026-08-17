@@ -41,7 +41,7 @@ class MusicPlayerAudioHandler extends BaseAudioHandler with SeekHandler {
           ? AudioProcessingState.loading
           : AudioProcessingState.ready,
       playing: _controller.playing,
-      updatePosition: _controller.player?.state.position,
+      updatePosition: _controller.player?.state.position ?? Duration.zero,
     ));
   }
 
@@ -64,7 +64,7 @@ class MusicPlayerAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> play() async {
-    _controller.play();
+    _controller.resumePlay();
     _sync();
   }
 

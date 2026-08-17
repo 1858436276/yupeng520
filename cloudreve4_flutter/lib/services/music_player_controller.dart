@@ -140,7 +140,7 @@ class MusicPlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void play() {
+  void resumePlay() {
     final player = _player;
     if (player == null || player.state.playing) return;
     player.play();
