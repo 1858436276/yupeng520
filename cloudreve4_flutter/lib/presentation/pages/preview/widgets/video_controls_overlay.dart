@@ -982,6 +982,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               if (!completed) return const SizedBox.shrink();
               return StreamBuilder<Duration>(
                 stream: player.stream.position,
+                initialData: player.state.position,
                 builder: (context, posSnapshot) {
                   final pos = posSnapshot.data ?? Duration.zero;
                   final dur = player.state.duration;
@@ -1249,9 +1250,11 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
         // 时间
         StreamBuilder<Duration>(
           stream: player.stream.position,
+          initialData: player.state.position,
           builder: (context, posSnapshot) {
             return StreamBuilder<Duration>(
               stream: player.stream.duration,
+              initialData: player.state.duration,
               builder: (context, durSnapshot) {
                 final pos = posSnapshot.data ?? Duration.zero;
                 final dur = durSnapshot.data ?? Duration.zero;
@@ -1397,9 +1400,11 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   Widget _buildSeekBar() {
     return StreamBuilder<Duration>(
       stream: player.stream.position,
+      initialData: player.state.position,
       builder: (context, posSnapshot) {
         return StreamBuilder<Duration>(
           stream: player.stream.duration,
+          initialData: player.state.duration,
           builder: (context, durSnapshot) {
             return StreamBuilder<Duration>(
               stream: player.stream.buffer,

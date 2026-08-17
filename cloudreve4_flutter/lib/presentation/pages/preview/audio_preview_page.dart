@@ -252,10 +252,12 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
       children: [
         StreamBuilder(
           stream: widget.player.stream.position,
+          initialData: widget.player.state.position,
           builder: (context, snapshot) {
             final position = snapshot.data ?? Duration.zero;
             return StreamBuilder(
               stream: widget.player.stream.duration,
+              initialData: widget.player.state.duration,
               builder: (context, snapshot) {
                 final duration = snapshot.data ?? Duration.zero;
                 return SliderTheme(
@@ -288,10 +290,12 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: StreamBuilder(
             stream: widget.player.stream.position,
+            initialData: widget.player.state.position,
             builder: (context, snapshot) {
               final position = snapshot.data ?? Duration.zero;
               return StreamBuilder(
                 stream: widget.player.stream.duration,
+                initialData: widget.player.state.duration,
                 builder: (context, snapshot) {
                   final duration = snapshot.data ?? Duration.zero;
                   return Row(
