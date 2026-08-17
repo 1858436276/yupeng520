@@ -21,6 +21,11 @@ class MusicPlayerController extends ChangeNotifier {
   String? _error;
   bool _audioPageVisible = false;
 
+  /// 播放会话版本号：每次 play()/stop() 递增，用于丢弃过期的 completed 跳歌
+  int _playVersion = 0;
+  /// 加载序号：避免并发 _load 互相覆盖
+  int _loadSeq = 0;
+
   StreamSubscription<void>? _completedSub;
 
   Player? get player => _player;
@@ -59,7 +64,7 @@ class MusicPlayerController extends ChangeNotifier {
     _index = index.clamp(0, files.length - 1);
     _current = _playlist[_index];
     _player ??= Player();
-    _subscribeCompleted();
+    _playVersion++;
     _load();
     notifyListeners();
   }
@@ -68,8 +73,11 @@ class MusicPlayerController extends ChangeNotifier {
     final file = _current;
     final player = _player;
     if (file == null || player == null) return;
+    final seq = ++_loadSeq;
     _loading = true;
     _error = null;
+    // open 新媒体前先取消 completed 订阅，避免替换旧媒体时触发跳歌
+    _completedSub?.cancel();
     notifyListeners();
     try {
       final response = await FileService().getDownloadUrls(
@@ -77,21 +85,33 @@ class MusicPlayerController extends ChangeNotifier {
         download: false,
         entity: _entityId,
       );
+      if (seq != _loadSeq) return;
       final urls = response['urls'] as List<dynamic>? ?? [];
       if (urls.isEmpty) throw Exception('无法获取音频URL');
       final url = (urls[0] as Map<String, dynamic>)['url'] as String;
       await player.open(Media(url), play: true);
     } catch (e) {
-      _error = e.toString();
+      if (seq == _loadSeq) _error = e.toString();
     } finally {
-      _loading = false;
-      notifyListeners();
+      _subscribeCompleted();
+      if (seq == _loadSeq) {
+        _loading = false;
+        notifyListeners();
+      }
     }
   }
 
   void _subscribeCompleted() {
-    _completedSub ??= _player?.stream.completed.listen((_) {
-      if (_playlist.length > 1) next();
+    _completedSub?.cancel();
+    _completedSub = _player?.stream.completed.listen((_) {
+      final p = _player;
+      if (p == null || !p.state.completed) return;
+      final v = _playVersion;
+      // 延迟执行并校验版本：期间若用户切换了新的播放会话则忽略，避免跳错歌
+      Future.microtask(() {
+        if (v != _playVersion) return;
+        if (_playlist.length > 1) next();
+      });
     });
   }
 
@@ -122,6 +142,7 @@ class MusicPlayerController extends ChangeNotifier {
 
   /// 真正退出：销毁播放器并清空状态。
   void stop() {
+    _playVersion++;
     _completedSub?.cancel();
     _completedSub = null;
     _player?.dispose();
