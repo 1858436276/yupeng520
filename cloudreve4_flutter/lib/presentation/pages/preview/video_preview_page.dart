@@ -51,6 +51,9 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
   /// 切换视频中（网络慢时旧视频继续播放，同时显示加载遮罩）
   bool _switching = false;
 
+  /// 已获取的视频 URL 缓存，网络不好时切换视频也能立即打开
+  final Map<String, String> _urlCache = {};
+
   @override
   void initState() {
     super.initState();
@@ -91,12 +94,31 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
   }
 
   Future<void> _openFile(FileModel file, {bool isSwitch = false}) async {
+    final targetIndex = _videos.indexWhere((f) => f.id == file.id);
+    if (targetIndex >= 0) _index = targetIndex;
+
     if (mounted) {
       setState(() {
-        if (isSwitch) _switching = true;
-        _errorMessage = null;
+        if (isSwitch) {
+          _switching = true;
+          _errorMessage = null;
+          // 网络不好也要立刻切换：先暂停旧视频，立即进入切换状态
+          player.pause();
+        }
       });
     }
+
+    // 命中缓存则直接打开，无需等待网络请求，实现立即切换
+    final cachedUrl = _urlCache[file.id];
+    if (cachedUrl != null) {
+      try {
+        await player.open(Media(cachedUrl), play: true);
+        return;
+      } catch (_) {
+        _urlCache.remove(file.id);
+      }
+    }
+
     try {
       final response = await FileService().getDownloadUrls(
         uris: [file.relativePath],
@@ -109,11 +131,12 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
         throw Exception('无法获取视频URL');
       }
       final url = (urls[0] as Map<String, dynamic>)['url'] as String;
+      _urlCache[file.id] = url;
       await player.open(Media(url), play: true);
     } catch (e) {
       if (mounted) {
         if (isSwitch) {
-          // 切换失败：保留旧视频继续播放，仅提示用户
+          // 切换失败：保留当前画面，仅提示用户
           ToastHelper.error('视频加载失败，请重试');
         } else {
           setState(() => _errorMessage = e.toString());
@@ -121,7 +144,26 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
       }
     } finally {
       if (mounted) setState(() => _switching = false);
+      _schedulePrefetch();
     }
+  }
+
+  /// 预取列表中下一个视频的 URL，网络不好时切换视频无需等待网络请求
+  Future<void> _schedulePrefetch() async {
+    final nextIndex = _index + 1;
+    if (nextIndex >= _videos.length) return;
+    final next = _videos[nextIndex];
+    if (_urlCache.containsKey(next.id)) return;
+    try {
+      final response = await FileService().getDownloadUrls(
+        uris: [next.relativePath],
+        download: false,
+        entity: widget.entityId,
+      );
+      final urls = response['urls'] as List<dynamic>? ?? [];
+      if (urls.isEmpty) return;
+      _urlCache[next.id] = (urls[0] as Map<String, dynamic>)['url'] as String;
+    } catch (_) {}
   }
 
   Future<void> _loadVideoUrl() async {
@@ -240,7 +282,7 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
                       ),
                       if (_switching)
                         const ColoredBox(
-                          color: Colors.black45,
+                          color: Colors.black,
                           child: Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,

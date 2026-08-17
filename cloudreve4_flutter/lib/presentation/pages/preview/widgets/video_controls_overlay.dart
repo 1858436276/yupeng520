@@ -945,11 +945,31 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
           // Buffering 指示器
           StreamBuilder<bool>(
             stream: player.stream.buffering,
+            initialData: player.state.buffering,
             builder: (context, snapshot) {
-              final buffering = snapshot.data ?? false;
+              final buffering = snapshot.data ?? player.state.buffering;
               if (!buffering) return const SizedBox.shrink();
-              return const Center(
-                child: CircularProgressIndicator(color: Colors.white70),
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(color: Colors.white70),
+                    const SizedBox(height: 10),
+                    Text(
+                      '网络不佳，正在缓冲…',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        fontSize: 14,
+                        shadows: [
+                          Shadow(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            blurRadius: 4,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               );
             },
           ),
