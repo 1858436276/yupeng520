@@ -907,6 +907,15 @@ class _AppShellState extends State<AppShell> with GestureHandlerMixin, TickerPro
                 _clearMobileFileSelection(fileManager);
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.archive),
+              title: const Text('压缩到压缩包'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                FileOperationDialogs.showCompressDialog(context, fileManager, selectedFiles);
+                _clearMobileFileSelection(fileManager);
+              },
+            ),
             if (hasFolder)
               ListTile(
                 leading: const Icon(Icons.drive_folder_upload_outlined),

@@ -35,6 +35,8 @@ class FileGridItem extends StatelessWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onRestore;
   final VoidCallback? onInfo;
+  final VoidCallback? onCompress;
+  final VoidCallback? onExtract;
   final bool tapToShowMenu;
   final String? contextHint;
   final void Function(List<XFile> files)? onDropFiles;
@@ -59,6 +61,8 @@ class FileGridItem extends StatelessWidget {
     this.onDelete,
     this.onRestore,
     this.onInfo,
+    this.onCompress,
+    this.onExtract,
     this.contextHint,
     this.onDropFiles,
   });
@@ -106,6 +110,8 @@ class FileGridItem extends StatelessWidget {
       hasDelete: onDelete != null,
       hasRestore: onRestore != null,
       hasInfo: onInfo != null,
+      hasCompress: onCompress != null,
+      hasExtract: onExtract != null,
     );
 
     switch (result) {
@@ -131,6 +137,10 @@ class FileGridItem extends StatelessWidget {
         onRestore?.call();
       case FileMenuAction.info:
         onInfo?.call();
+      case FileMenuAction.compress:
+        onCompress?.call();
+      case FileMenuAction.extract:
+        onExtract?.call();
       case null:
         break;
     }

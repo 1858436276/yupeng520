@@ -11,6 +11,7 @@ import '../../../core/utils/date_utils.dart' as date_utils;
 import '../../../core/constants/sort_options.dart';
 import '../../../core/constants/storage_keys.dart';
 import '../../../core/utils/file_type_utils.dart';
+import '../../../core/utils/file_utils.dart';
 import '../../../data/models/file_model.dart';
 import '../../../router/app_router.dart';
 import '../../../services/file_service.dart';
@@ -901,6 +902,31 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
                 FileInfoPanel.showAsBottomSheet(context, file);
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.archive),
+              title: const Text('压缩'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                FileOperationDialogs.showCompressDialog(
+                  context,
+                  context.read<FileManagerProvider>(),
+                  [file],
+                );
+              },
+            ),
+            if (!file.isFolder && FileUtils.isArchiveFile(file.name))
+              ListTile(
+                leading: const Icon(Icons.unarchive),
+                title: const Text('解压'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  FileOperationDialogs.showExtractDialog(
+                    context,
+                    context.read<FileManagerProvider>(),
+                    file,
+                  );
+                },
+              ),
           ],
         ),
       ),

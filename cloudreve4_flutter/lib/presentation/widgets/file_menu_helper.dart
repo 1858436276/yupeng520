@@ -20,6 +20,8 @@ enum FileMenuAction {
   info,
   delete,
   restore,
+  compress,
+  extract,
 }
 
 /// 显示文件菜单。
@@ -39,6 +41,8 @@ Future<FileMenuAction?> showFileMenu({
   required bool hasDelete,
   required bool hasRestore,
   bool hasInfo = false,
+  bool hasCompress = false,
+  bool hasExtract = false,
 }) async {
   final renderBox = context.findRenderObject() as RenderBox?;
   if (renderBox == null) {
@@ -76,6 +80,10 @@ Future<FileMenuAction?> showFileMenu({
       _FileMenuItem(FileMenuAction.copy, Icons.copy, '复制'),
     if (hasShare)
       _FileMenuItem(FileMenuAction.share, Icons.share, '分享'),
+    if (hasCompress)
+      _FileMenuItem(FileMenuAction.compress, Icons.archive, '压缩'),
+    if (hasExtract)
+      _FileMenuItem(FileMenuAction.extract, Icons.unarchive, '解压'),
     if (hasInfo)
       _FileMenuItem(FileMenuAction.info, LucideIcons.info, '详情'),
     if (hasDelete)

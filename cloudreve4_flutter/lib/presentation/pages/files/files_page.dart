@@ -429,6 +429,14 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.archive),
+              title: const Text('压缩到压缩包'),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                FileOperationDialogs.showCompressDialog(context, fileManager, selectedFiles);
+              },
+            ),
             if (hasFolder)
               ListTile(
                 leading: const Icon(Icons.drive_folder_upload_outlined),
@@ -1598,6 +1606,10 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
                     onShare: () => FileOperationDialogs.showShareDialog(context, file),
                     onDelete: () => FileOperationDialogs.showDeleteSingleConfirmation(context, fileManager, file),
                     onInfo: () => _showFileInfo(file),
+                    onCompress: () => FileOperationDialogs.showCompressDialog(context, fileManager, [file]),
+                    onExtract: !file.isFolder && FileUtils.isArchiveFile(file.name)
+                        ? () => FileOperationDialogs.showExtractDialog(context, fileManager, file)
+                        : null,
                     onDropFiles: file.isFolder
                         ? (files) => _handleDroppedFilesToFolder(file, files)
                         : null,
@@ -1707,6 +1719,10 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
               onShare: () => FileOperationDialogs.showShareDialog(context, file),
               onDelete: () => FileOperationDialogs.showDeleteSingleConfirmation(context, fileManager, file),
               onInfo: () => _showFileInfo(file),
+              onCompress: () => FileOperationDialogs.showCompressDialog(context, fileManager, [file]),
+              onExtract: !file.isFolder && FileUtils.isArchiveFile(file.name)
+                  ? () => FileOperationDialogs.showExtractDialog(context, fileManager, file)
+                  : null,
               onDropFiles: file.isFolder
                   ? (files) => _handleDroppedFilesToFolder(file, files)
                   : null,

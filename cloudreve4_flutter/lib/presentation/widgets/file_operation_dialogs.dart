@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:cloudreve4_flutter/core/utils/app_logger.dart';
+import 'package:cloudreve4_flutter/core/utils/file_utils.dart';
 import 'package:cloudreve4_flutter/data/models/file_model.dart';
 import 'package:cloudreve4_flutter/services/file_service.dart';
 import 'package:file_picker/file_picker.dart';
@@ -318,6 +320,342 @@ class FileOperationDialogs {
   ) {
     // 委托给 share/share_dialog.dart 中的顶层函数
     return showShareCreationDialog(context, file);
+  }
+
+  /// 显示在线压缩对话框（服务端打包，不占本地空间）
+  static Future<void> showCompressDialog(
+    BuildContext context,
+    FileManagerProvider fileManager,
+    List<FileModel> files,
+  ) async {
+    if (files.isEmpty) return;
+
+    final isDesktop = MediaQuery.of(context).size.width > 600;
+    String selectedDst = '/';
+    bool folderSelected = false;
+    final nameController = TextEditingController(
+      text: files.length == 1 ? _defaultArchiveName(files.first) : 'archive.zip',
+    );
+    final passwordController = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final theme = Theme.of(ctx);
+          return AlertDialog(
+            insetPadding: EdgeInsets.symmetric(
+              horizontal: isDesktop ? 40 : MediaQuery.of(ctx).size.width * 0.05,
+            ),
+            title: Row(
+              children: [
+                Icon(LucideIcons.archive, color: theme.colorScheme.primary, size: 22),
+                const SizedBox(width: 8),
+                const Text('在线压缩'),
+              ],
+            ),
+            content: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isDesktop ? 500 : MediaQuery.of(ctx).size.width * 0.9,
+                maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '将 ${files.length} 个文件/文件夹打包为压缩包（zip/7z）',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '保存位置',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  if (folderSelected) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: theme.colorScheme.outlineVariant),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.folder, size: 18, color: theme.colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              selectedDst == '/' ? '/ (根目录)' : selectedDst,
+                              style: const TextStyle(fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setDialogState(() => folderSelected = false),
+                            child: const Text('修改'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else
+                    Container(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(ctx).size.height * 0.4,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: theme.colorScheme.outlineVariant),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: FolderPicker(
+                        currentPath: fileManager.currentPath,
+                        maxVisibleItems: isDesktop ? null : 3,
+                        onFolderSelected: (path) {
+                          setDialogState(() {
+                            selectedDst = path;
+                            folderSelected = true;
+                          });
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: '压缩包文件名',
+                      hintText: 'archive.zip',
+                      prefixIcon: Icon(Icons.archive),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: '压缩密码（可选）',
+                      hintText: '留空则不设置密码',
+                      prefixIcon: Icon(LucideIcons.lock),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('压缩'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final fileName = nameController.text.trim();
+    if (fileName.isEmpty) {
+      ToastHelper.error('请输入压缩包文件名');
+      return;
+    }
+
+    final srcUris = files.map((f) => f.path).toList();
+    final dstUri = _buildArchiveDst(selectedDst, fileName);
+    final password = passwordController.text;
+
+    try {
+      await FileService().createArchive(
+        srcUris: srcUris,
+        dstUri: dstUri,
+        password: password.isEmpty ? null : password,
+      );
+      if (context.mounted) {
+        ToastHelper.success('已创建压缩任务，可在任务页查看进度');
+        fileManager.loadFiles(refresh: true);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        AppLogger.e('创建压缩任务失败: $e');
+        ToastHelper.failure('创建压缩任务失败: $e');
+      }
+    }
+  }
+
+  /// 显示在线解压对话框（服务端解压，不占本地空间）
+  static Future<void> showExtractDialog(
+    BuildContext context,
+    FileManagerProvider fileManager,
+    FileModel file,
+  ) async {
+    if (!file.isFolder && !FileUtils.isArchiveFile(file.name)) return;
+
+    final isDesktop = MediaQuery.of(context).size.width > 600;
+    String selectedDst = fileManager.currentPath;
+    bool folderSelected = false;
+    final passwordController = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final theme = Theme.of(ctx);
+          return AlertDialog(
+            insetPadding: EdgeInsets.symmetric(
+              horizontal: isDesktop ? 40 : MediaQuery.of(ctx).size.width * 0.05,
+            ),
+            title: Row(
+              children: [
+                Icon(LucideIcons.archive, color: theme.colorScheme.primary, size: 22),
+                const SizedBox(width: 8),
+                const Text('解压压缩包'),
+              ],
+            ),
+            content: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isDesktop ? 500 : MediaQuery.of(ctx).size.width * 0.9,
+                maxHeight: MediaQuery.of(ctx).size.height * 0.75,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '解压「${file.name}」到以下目录',
+                    style: const TextStyle(fontSize: 13),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '解压位置',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  if (folderSelected) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: theme.colorScheme.outlineVariant),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.folder, size: 18, color: theme.colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              selectedDst == '/' ? '/ (根目录)' : selectedDst,
+                              style: const TextStyle(fontSize: 14),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setDialogState(() => folderSelected = false),
+                            child: const Text('修改'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else
+                    Container(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(ctx).size.height * 0.4,
+                      ),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: theme.colorScheme.outlineVariant),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: FolderPicker(
+                        currentPath: fileManager.currentPath,
+                        maxVisibleItems: isDesktop ? null : 3,
+                        onFolderSelected: (path) {
+                          setDialogState(() {
+                            selectedDst = path;
+                            folderSelected = true;
+                          });
+                        },
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: '压缩包密码（可选）',
+                      hintText: '加密压缩包需输入密码',
+                      prefixIcon: Icon(LucideIcons.lock),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('解压'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) return;
+
+    final dstUri = _buildDirDst(selectedDst);
+    final password = passwordController.text;
+
+    try {
+      await FileService().extractArchive(
+        srcUri: file.path,
+        dstUri: dstUri,
+        password: password.isEmpty ? null : password,
+      );
+      if (context.mounted) {
+        ToastHelper.success('已创建解压任务，可在任务页查看进度');
+        fileManager.loadFiles(refresh: true);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        AppLogger.e('创建解压任务失败: $e');
+        ToastHelper.failure('创建解压任务失败: $e');
+      }
+    }
+  }
+
+  static String _defaultArchiveName(FileModel file) {
+    final name = file.name;
+    final dot = name.lastIndexOf('.');
+    final base = dot > 0 ? name.substring(0, dot) : name;
+    return '$base.zip';
+  }
+
+  /// 将"目标目录 + 文件名"拼成压缩包目标 cloudreve URI。
+  static String _buildArchiveDst(String dstPath, String fileName) {
+    final dir = _buildDirDst(dstPath);
+    return dir == 'cloudreve://my' ? 'cloudreve://my/$fileName' : '$dir/$fileName';
+  }
+
+  static String _buildDirDst(String dstPath) {
+    return FileUtils.toCloudreveUri(dstPath);
   }
 
   static Future<void> showExportDirectoryDialog(

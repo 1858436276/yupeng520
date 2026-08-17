@@ -388,4 +388,65 @@ class FileService {
 
     await ApiService.instance.delete<void>('/file/version', data: data);
   }
+
+  /// 创建在线压缩任务（服务端打包生成压缩包）
+  ///
+  /// [srcUris] 待压缩的文件/文件夹路径，[dstUri] 目标压缩包路径
+  /// （如 `/dir/archive.zip`）。支持 zip/7z，格式由目标文件名后缀决定。
+  Future<Map<String, dynamic>> createArchive({
+    required List<String> srcUris,
+    required String dstUri,
+    String? password,
+  }) async {
+    final data = <String, dynamic>{
+      'src': srcUris.map((uri) => FileUtils.toCloudreveUri(uri)).toList(),
+      'dst': FileUtils.toCloudreveUri(dstUri),
+      if (password != null && password.isNotEmpty) 'password': password,
+    };
+
+    return ApiService.instance.post<Map<String, dynamic>>(
+      '/workflow/archive',
+      data: data,
+    );
+  }
+
+  /// 创建在线解压任务（服务端解压压缩包到指定目录）
+  ///
+  /// [srcUri] 待解压的压缩包路径（zip/7z），[dstUri] 目标目录路径。
+  Future<Map<String, dynamic>> extractArchive({
+    required String srcUri,
+    required String dstUri,
+    String? password,
+    String? encoding,
+  }) async {
+    final data = <String, dynamic>{
+      'src': [FileUtils.toCloudreveUri(srcUri)],
+      'dst': FileUtils.toCloudreveUri(dstUri),
+      if (password != null && password.isNotEmpty) 'password': password,
+      if (encoding != null && encoding.isNotEmpty) 'encoding': encoding,
+    };
+
+    return ApiService.instance.post<Map<String, dynamic>>(
+      '/workflow/extract',
+      data: data,
+    );
+  }
+
+  /// 获取压缩包内容文件列表
+  ///
+  /// 仅支持 zip / 7z 压缩包。
+  Future<Map<String, dynamic>> getArchiveFileList({
+    required String uri,
+    String? entity,
+    String? textEncoding,
+  }) async {
+    final params = _cleanQueryParams({
+      'uri': FileUtils.toCloudreveUri(uri),
+      'entity': ?entity,
+      'text_encoding': ?textEncoding,
+    });
+
+    return ApiService.instance
+        .get<Map<String, dynamic>>('/file/archive', queryParameters: params);
+  }
 }
