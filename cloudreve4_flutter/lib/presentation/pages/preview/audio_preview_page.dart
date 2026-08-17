@@ -356,10 +356,11 @@ class _AudioPlayerWidgetState extends State<AudioPlayerWidget> {
           ),
 
           // 播放/暂停
-          StreamBuilder(
+          StreamBuilder<bool>(
             stream: widget.player.stream.playing,
+            initialData: widget.player.state.playing,
             builder: (context, snapshot) {
-              final playing = snapshot.data ?? false;
+              final playing = snapshot.data ?? widget.player.state.playing;
               return Container(
                 width: isSmallScreen ? 56 : 72,
                 height: isSmallScreen ? 56 : 72,

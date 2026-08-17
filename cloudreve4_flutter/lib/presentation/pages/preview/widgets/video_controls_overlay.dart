@@ -1215,8 +1215,9 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
         // 播放/暂停
         StreamBuilder<bool>(
           stream: player.stream.playing,
+          initialData: player.state.playing,
           builder: (context, snapshot) {
-            final playing = snapshot.data ?? false;
+            final playing = snapshot.data ?? player.state.playing;
             return IconButton(
               icon: Icon(playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
               onPressed: _togglePlayPause,
