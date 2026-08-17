@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../../services/app_update_service.dart';
 import '../../services/mini_video_controller.dart';
 import '../pages/preview/video_preview_page.dart';
 
@@ -25,8 +26,10 @@ class _MiniVideoWindowState extends State<MiniVideoWindow> {
     final file = files[index.clamp(0, files.length - 1)];
     final vc = mini.videoController;
     if (vc == null) return;
+    final navigator = AppUpdateService.navigatorKey.currentState;
+    if (navigator == null) return;
     mini.clear();
-    Navigator.of(context).push(
+    navigator.push(
       MaterialPageRoute<void>(
         builder: (_) => VideoPreviewPage(
           file: file,

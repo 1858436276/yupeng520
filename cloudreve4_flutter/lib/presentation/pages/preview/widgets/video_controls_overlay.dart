@@ -1038,6 +1038,32 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               ),
             ),
 
+          // 锁屏按钮（常驻视频左中间，横竖屏统一位置）
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 12),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: _onLockToggle,
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: Colors.black38,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white38, width: 1),
+                  ),
+                  child: Icon(
+                    _locked ? Icons.lock : Icons.lock_open,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
           // 锁屏提示（单击解锁）
           if (_locked)
             Center(
@@ -1254,15 +1280,6 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             tooltip: '横/竖屏切换',
             onPressed: _toggleOrientation,
           ),
-        // 锁定按钮
-        IconButton(
-          icon: Icon(
-            _locked ? Icons.lock : Icons.lock_open,
-            color: Colors.white,
-            size: 20,
-          ),
-          onPressed: _onLockToggle,
-        ),
         // 设置按钮（解码/画面比例/小屏播放）
         IconButton(
           icon: const Icon(Icons.settings, color: Colors.white, size: 20),

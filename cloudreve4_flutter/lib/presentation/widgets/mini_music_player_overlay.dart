@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../data/models/file_model.dart';
+import '../../../services/app_update_service.dart';
 import '../../../services/music_player_controller.dart';
 import '../pages/preview/audio_preview_page.dart';
 import 'thumbnail_image.dart';
@@ -25,7 +26,9 @@ class _MiniMusicPlayerOverlayState extends State<MiniMusicPlayerOverlay> {
     if (controller.audioPageVisible) return;
     final file = controller.current;
     if (file == null) return;
-    Navigator.of(context).push(
+    final navigator = AppUpdateService.navigatorKey.currentState;
+    if (navigator == null) return;
+    navigator.push(
       MaterialPageRoute<void>(
         builder: (_) => AudioPreviewPage(
           file: file,
@@ -114,8 +117,10 @@ class _MiniMusicPlayerOverlayState extends State<MiniMusicPlayerOverlay> {
                     behavior: HitTestBehavior.opaque,
                     onTap: () {
                       if (_controller.audioPageVisible) {
-                        final navigator = Navigator.of(context);
-                        if (navigator.canPop()) navigator.pop();
+                        final navigator = AppUpdateService.navigatorKey.currentState;
+                        if (navigator != null && navigator.canPop()) {
+                          navigator.pop();
+                        }
                       }
                       _controller.stop();
                     },
