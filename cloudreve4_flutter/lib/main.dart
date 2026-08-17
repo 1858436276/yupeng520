@@ -268,16 +268,9 @@ void main() async {
   await AndroidCompatService.initialize();
 
   // 初始化音频播放媒体会话（通知栏播放器：封面/歌名/上一首/下一首）。
+  // 该初始化改为 runApp 之后异步执行，避免服务绑定失败/超时阻塞启动导致黑屏。
   if (Platform.isAndroid || Platform.isIOS) {
-    await AudioService.init(
-      builder: () => MusicPlayerAudioHandler(MusicPlayerController.instance),
-      config: const AudioServiceConfig(
-        androidNotificationChannelId: 'com.qyupeng.cloudreve.music',
-        androidNotificationChannelName: '音乐播放',
-        androidNotificationOngoing: true,
-        androidStopForegroundOnPause: true,
-      ),
-    );
+    unawaited(_initAudioService());
   }
 
   // 初始化上传前台服务配置（Android 后台上传通知）。
@@ -311,6 +304,24 @@ void main() async {
   );
 
   runApp(const CloudreveApp());
+}
+
+/// 初始化音频播放媒体会话（通知栏播放器：封面/歌名/上一首/下一首）。
+/// 首帧后异步执行；失败仅降级通知栏功能，不影响应用启动。
+Future<void> _initAudioService() async {
+  try {
+    await AudioService.init(
+      builder: () => MusicPlayerAudioHandler(MusicPlayerController.instance),
+      config: const AudioServiceConfig(
+        androidNotificationChannelId: 'com.qyupeng.cloudreve.music',
+        androidNotificationChannelName: '音乐播放',
+        androidNotificationOngoing: true,
+        androidStopForegroundOnPause: true,
+      ),
+    ).timeout(const Duration(seconds: 5));
+  } catch (e) {
+    AppLogger.e('AudioService.init 失败，通知栏播放器不可用: $e');
+  }
 }
 
 class CloudreveApp extends StatelessWidget {
