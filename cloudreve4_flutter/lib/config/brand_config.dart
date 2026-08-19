@@ -64,7 +64,7 @@ class BrandConfig {
     if (mkw_brand.mkwBrandConfigReady && generated.isNotEmpty) {
       return generated;
     }
-    return 'com.limo.cloudreve4_flutter';
+    return 'com.pan.yupeng520.top';
   }
 
   /// 是否锁定服务器。锁定后 UI 不再显示服务器选择/管理入口。
@@ -94,7 +94,7 @@ class BrandConfig {
     final envName = _envFixedServerName.trim();
     if (envName.isNotEmpty) return envName;
 
-    return appName.trim().isNotEmpty ? appName.trim() : '小白云盘';
+    return appName.trim().isNotEmpty ? appName.trim() : '小白云盘一号服务器';
   }
 
   /// 规范化后的 Cloudreve V4 API 地址，确保末尾为 /api/v4。
