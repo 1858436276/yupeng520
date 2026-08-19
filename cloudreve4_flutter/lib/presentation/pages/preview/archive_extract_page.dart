@@ -350,7 +350,7 @@ class _ExtractDialogState extends State<_ExtractDialog> {
       ),
       title: Row(
         children: [
-          Icon(LucideIcons.unarchive, color: theme.colorScheme.primary, size: 22),
+          Icon(Icons.unarchive, color: theme.colorScheme.primary, size: 22),
           const SizedBox(width: 8),
           const Text('解压到云盘'),
         ],
