@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/gestures.dart';
@@ -11,6 +12,7 @@ import '../../../data/models/share_model.dart';
 import '../../../router/app_router.dart';
 import '../../../services/share_link_service.dart';
 import '../../providers/download_manager_provider.dart';
+import '../../widgets/file_operation_dialogs.dart';
 import '../../widgets/folder_picker.dart';
 import '../../widgets/toast_helper.dart';
 import '../../widgets/user_avatar.dart';
@@ -323,6 +325,10 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
     if (_busyDownload) return;
     setState(() => _busyDownload = true);
     try {
+      final saveDir =
+          await FileOperationDialogs.showDownloadLocationDialog(context);
+      if (saveDir == null || !mounted) return;
+
       final result = await ShareLinkService.instance.resolveDownloadUrl(
         context: _context,
         candidateUri: candidateUri,
@@ -334,11 +340,13 @@ class _ShareLinkPageState extends State<ShareLinkPage> {
       final downloadManager = context.read<DownloadManagerProvider>();
       final pseudoUri = 'share://${_context.id}/${Uri.encodeComponent(fileName)}'
           '${archive ? '?archive=1' : ''}';
+      final finalName = archive ? '$fileName.zip' : fileName;
       final task = await downloadManager.addDownloadTask(
-        fileName: archive ? '$fileName.zip' : fileName,
+        fileName: finalName,
         fileUri: pseudoUri,
         fileSize: fileSize,
         downloadUrl: result.url,
+        savePath: '$saveDir${Platform.pathSeparator}$finalName',
       );
 
       if (!mounted) return;

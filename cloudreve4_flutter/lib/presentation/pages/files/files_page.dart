@@ -1864,6 +1864,8 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
       );
     } else if (FileTypeUtils.isTextCode(file.name)) {
       TextActionMenu.show(context, file);
+    } else if (!file.isFolder && FileUtils.isArchiveFile(file.name)) {
+      Navigator.of(context).pushNamed(RouteNames.archiveExtract, arguments: file);
     } else {
       ToastHelper.info('暂不支持预览 ${FileTypeUtils.getFileTypeDescription(file.name)}');
     }
@@ -1880,13 +1882,18 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
     if (isDesktop && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       await _showDesktopDownloadDialog(fileManager, [file]);
     } else if (file.isFolder) {
-      await _downloadAsArchive(fileManager, [file]);
+      final saveDir = await FileOperationDialogs.showDownloadLocationDialog(context);
+      if (saveDir == null || !mounted) return;
+      await _downloadAsArchive(fileManager, [file], customParentDir: saveDir);
     } else {
+      final saveDir = await FileOperationDialogs.showDownloadLocationDialog(context);
+      if (saveDir == null || !mounted) return;
       final downloadManager = Provider.of<DownloadManagerProvider>(context, listen: false);
       final task = await downloadManager.addDownloadTask(
         fileName: file.name,
         fileUri: file.relativePath,
         fileSize: file.size,
+        savePath: '$saveDir${Platform.pathSeparator}${file.name}',
       );
 
       if (task != null) {
@@ -1910,8 +1917,27 @@ class _FilesPageState extends State<FilesPage> with TickerProviderStateMixin {
     final isDesktop = MediaQuery.of(context).size.width >= 1000;
     if (isDesktop && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       await _showDesktopDownloadDialog(fileManager, files);
+    } else if (files.length == 1 && !files.first.isFolder) {
+      final saveDir = await FileOperationDialogs.showDownloadLocationDialog(context);
+      if (saveDir == null || !mounted) return;
+      final file = files.first;
+      final downloadManager = Provider.of<DownloadManagerProvider>(context, listen: false);
+      final task = await downloadManager.addDownloadTask(
+        fileName: file.name,
+        fileUri: file.relativePath,
+        fileSize: file.size,
+        savePath: '$saveDir${Platform.pathSeparator}${file.name}',
+      );
+      if (!mounted) return;
+      if (task != null) {
+        ToastHelper.info('文件已在下载列表中');
+      } else {
+        ToastHelper.info('开始下载，查看任务页');
+      }
     } else {
-      await _downloadAsArchive(fileManager, files);
+      final saveDir = await FileOperationDialogs.showDownloadLocationDialog(context);
+      if (saveDir == null || !mounted) return;
+      await _downloadAsArchive(fileManager, files, customParentDir: saveDir);
     }
   }
 

@@ -722,6 +722,8 @@ class _CategoryFilesPageState extends State<CategoryFilesPage>
       Navigator.of(context).pushNamed(RouteNames.markdownPreview, arguments: file);
     } else if (FileTypeUtils.isTextCode(file.name)) {
       Navigator.of(context).pushNamed(RouteNames.documentPreview, arguments: file);
+    } else if (!file.isFolder && FileUtils.isArchiveFile(file.name)) {
+      Navigator.of(context).pushNamed(RouteNames.archiveExtract, arguments: file);
     } else {
       ToastHelper.info('暂不支持预览 ${FileTypeUtils.getFileTypeDescription(file.name)}');
     }

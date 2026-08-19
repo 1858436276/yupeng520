@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart' hide DateUtils;
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../../core/utils/date_utils.dart' as app_date_utils;
 import '../../../core/utils/file_icon_utils.dart';
 import '../../../core/utils/file_type_utils.dart';
+import '../../../core/utils/file_utils.dart';
 import '../../../data/models/file_model.dart';
 import '../../../router/app_router.dart';
 import '../../../services/file_service.dart';
@@ -12,6 +15,7 @@ import '../../providers/download_manager_provider.dart';
 import '../../widgets/file_grid_item.dart';
 import '../../widgets/file_list_header.dart';
 import '../../widgets/file_list_item.dart';
+import '../../widgets/file_operation_dialogs.dart';
 import '../../widgets/pdf_action_menu.dart';
 import '../../widgets/toast_helper.dart';
 
@@ -165,6 +169,8 @@ class _TransferredFilesPageState extends State<TransferredFilesPage> {
       Navigator.of(context).pushNamed(RouteNames.markdownPreview, arguments: file);
     } else if (FileTypeUtils.isTextCode(file.name)) {
       Navigator.of(context).pushNamed(RouteNames.documentPreview, arguments: file);
+    } else if (!file.isFolder && FileUtils.isArchiveFile(file.name)) {
+      Navigator.of(context).pushNamed(RouteNames.archiveExtract, arguments: file);
     } else {
       _openFileInfo(file);
     }
@@ -223,6 +229,10 @@ class _TransferredFilesPageState extends State<TransferredFilesPage> {
     setState(() => _downloadPreparing = true);
 
     try {
+      final saveDir = await FileOperationDialogs.showDownloadLocationDialog(context);
+      if (saveDir == null) return;
+      if (!mounted) return;
+
       final downloadManager = context.read<DownloadManagerProvider>();
       final shouldArchive = items.length > 1 || items.any((file) => file.isFolder);
 
@@ -250,6 +260,7 @@ class _TransferredFilesPageState extends State<TransferredFilesPage> {
           fileName: archiveName,
           fileUri: archiveUri,
           fileSize: 0,
+          savePath: '$saveDir${Platform.pathSeparator}$archiveName',
         );
 
         if (!mounted) return;
@@ -266,6 +277,7 @@ class _TransferredFilesPageState extends State<TransferredFilesPage> {
         fileName: file.name,
         fileUri: file.path,
         fileSize: file.size,
+        savePath: '$saveDir${Platform.pathSeparator}${file.name}',
       );
 
       if (!mounted) return;

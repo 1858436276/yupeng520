@@ -31,6 +31,7 @@ import '../data/models/file_model.dart';
 import '../presentation/pages/auth/qr_login_scan_page.dart';
 
 import 'package:cloudreve4_flutter/mkw_packager/generated/qr_login_config.dart';
+import '../presentation/pages/preview/archive_extract_page.dart';
 
 class RouteNames {
   static const String qrLoginScan = '/qr-login-scan';
@@ -59,6 +60,7 @@ class RouteNames {
   static const String shareLink = '/share-link';
   static const String cloudreveFileApp = '/cloudreve-file-app';
   static const String transferredFiles = '/transferred-files';
+  static const String archiveExtract = '/archive-extract';
 }
 
 class AppRouter {
@@ -351,6 +353,15 @@ class AppRouter {
           settings: settings,
           builder: (context) =>
               TransferredFilesPage(initialUri: args is String ? args : null),
+        );
+
+      case RouteNames.archiveExtract:
+        final args = settings.arguments;
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (context) => ArchiveExtractPage(
+            file: args is FileModel ? args : FileModel.fromJson(const {}),
+          ),
         );
 
       default:

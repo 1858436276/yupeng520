@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cloudreve4_flutter/presentation/providers/admin_provider.dart';
 import 'package:cloudreve4_flutter/presentation/providers/auth_provider.dart';
 import 'package:cloudreve4_flutter/presentation/providers/download_manager_provider.dart';
@@ -823,8 +825,34 @@ class _AppShellState extends State<AppShell> with GestureHandlerMixin, TickerPro
     if (selectedFiles.isEmpty) return false;
 
     try {
+      // 选择本地保存目录
+      final saveDir = await FileOperationDialogs.showDownloadLocationDialog(
+        context,
+      );
+      if (saveDir == null) return false;
+      if (!mounted) return false;
+
       final downloadManager =
           Provider.of<DownloadManagerProvider>(context, listen: false);
+
+      // 单选非文件夹时直接下载原文件，不打包压缩
+      if (selectedFiles.length == 1 && !selectedFiles.first.isFolder) {
+        final file = selectedFiles.first;
+        final task = await downloadManager.addDownloadTask(
+          fileName: file.name,
+          fileUri: file.relativePath,
+          fileSize: file.size,
+          savePath: '$saveDir${Platform.pathSeparator}${file.name}',
+        );
+        if (!mounted) return false;
+        if (task == null) {
+          ToastHelper.info('下载任务已存在');
+        } else {
+          ToastHelper.success('已添加下载任务');
+        }
+        return true;
+      }
+
       final uris = selectedFiles.map((file) => file.path).toList();
       final response = await FileService().getDownloadUrls(
         uris: uris,
@@ -850,6 +878,7 @@ class _AppShellState extends State<AppShell> with GestureHandlerMixin, TickerPro
         fileSize: 0,
         downloadUrl: url,
         initialStatus: DownloadStatus.archiving,
+        savePath: '$saveDir${Platform.pathSeparator}$archiveName',
       );
       if (!mounted) return false;
 

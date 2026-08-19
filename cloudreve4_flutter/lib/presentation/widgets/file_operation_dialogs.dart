@@ -1,9 +1,13 @@
 import 'dart:io';
 
+import 'package:cloudreve4_flutter/core/constants/storage_keys.dart';
 import 'package:cloudreve4_flutter/core/utils/app_logger.dart';
 import 'package:cloudreve4_flutter/core/utils/file_utils.dart';
 import 'package:cloudreve4_flutter/data/models/file_model.dart';
+import 'package:cloudreve4_flutter/services/android_compat_service.dart';
+import 'package:cloudreve4_flutter/services/download_service.dart';
 import 'package:cloudreve4_flutter/services/file_service.dart';
+import 'package:cloudreve4_flutter/services/storage_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -641,11 +645,182 @@ class FileOperationDialogs {
     }
   }
 
+  /// 下载位置对话框：显示当前本地保存目录，可更改并设为默认。
+  /// 返回选中的目录路径；取消返回 null。
+  static Future<String?> showDownloadLocationDialog(
+    BuildContext context, {
+    bool requestStoragePermission = true,
+  }) async {
+    if (requestStoragePermission && !kIsWeb && Platform.isAndroid) {
+      try {
+        await AndroidCompatService.ensureManageExternalStoragePermission();
+      } catch (e) {
+        AppLogger.w('请求存储权限失败: $e');
+      }
+    }
+
+    final isDesktop = MediaQuery.of(context).size.width > 600;
+    String? storedDir;
+    try {
+      storedDir = await StorageService.instance
+          .getString(StorageKeys.downloadDefaultDirectory);
+    } catch (_) {
+      storedDir = null;
+    }
+
+    Directory current;
+    try {
+      current = await DownloadService().getDownloadDirectory();
+    } catch (e) {
+      if (!context.mounted) return null;
+      ToastHelper.failure('获取下载目录失败：$e');
+      return null;
+    }
+    String selectedDir = (storedDir != null && storedDir.isNotEmpty &&
+            _dirExists(storedDir))
+        ? storedDir
+        : current.path;
+    bool setAsDefault = false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          final theme = Theme.of(ctx);
+          return AlertDialog(
+            insetPadding: EdgeInsets.symmetric(
+              horizontal:
+                  isDesktop ? 40 : MediaQuery.of(ctx).size.width * 0.05,
+            ),
+            title: Row(
+              children: [
+                Icon(Icons.download_rounded,
+                    color: theme.colorScheme.primary, size: 22),
+                const SizedBox(width: 8),
+                const Text('下载到'),
+              ],
+            ),
+            content: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isDesktop ? 480 : MediaQuery.of(ctx).size.width * 0.9,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '本地保存位置',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.folder,
+                            size: 18, color: theme.colorScheme.primary),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            selectedDir,
+                            style: const TextStyle(fontSize: 13),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            final picked = await FilePicker.platform
+                                .getDirectoryPath(
+                                  dialogTitle: '选择下载保存位置',
+                                  initialDirectory: _dirExists(selectedDir)
+                                      ? selectedDir
+                                      : null,
+                                );
+                            if (picked != null && picked.trim().isNotEmpty) {
+                              setDialogState(() {
+                                selectedDir = picked.trim();
+                              });
+                            }
+                          },
+                          child: const Text('更改'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  CheckboxListTile(
+                    value: setAsDefault,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        setAsDefault = value ?? false;
+                      });
+                    },
+                    title: const Text(
+                      '设为默认下载目录',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('确定'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed != true) return null;
+
+    if (setAsDefault) {
+      try {
+        await StorageService.instance
+            .setString(StorageKeys.downloadDefaultDirectory, selectedDir);
+      } catch (e) {
+        AppLogger.w('保存默认下载目录失败: $e');
+      }
+    }
+    return selectedDir;
+  }
+
   static String _defaultArchiveName(FileModel file) {
     final name = file.name;
     final dot = name.lastIndexOf('.');
     final base = dot > 0 ? name.substring(0, dot) : name;
     return '$base.zip';
+  }
+
+  /// 判断目录是否存在（web 环境安全返回 false）。
+  static bool _dirExists(String path) {
+    if (kIsWeb) return false;
+    try {
+      return Directory(path).existsSync();
+    } catch (_) {
+      return false;
+    }
   }
 
   /// 将"目标目录 + 文件名"拼成压缩包目标 cloudreve URI。

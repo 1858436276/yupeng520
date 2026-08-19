@@ -413,17 +413,20 @@ class FileService {
   /// 创建在线解压任务（服务端解压压缩包到指定目录）
   ///
   /// [srcUri] 待解压的压缩包路径（zip/7z），[dstUri] 目标目录路径。
+  /// [fileMask] 可选：只解压列表中的文件（或其前缀子目录），为空则解压全部。
   Future<Map<String, dynamic>> extractArchive({
     required String srcUri,
     required String dstUri,
     String? password,
     String? encoding,
+    List<String>? fileMask,
   }) async {
     final data = <String, dynamic>{
       'src': [FileUtils.toCloudreveUri(srcUri)],
       'dst': FileUtils.toCloudreveUri(dstUri),
       if (password != null && password.isNotEmpty) 'password': password,
       if (encoding != null && encoding.isNotEmpty) 'encoding': encoding,
+      if (fileMask != null && fileMask.isNotEmpty) 'file_mask': fileMask,
     };
 
     return ApiService.instance.post<Map<String, dynamic>>(
