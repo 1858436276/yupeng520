@@ -2,7 +2,7 @@
 // Mobile and desktop icons are intentionally separated.
 
 const String mkwAppName = "小白云盘";
-const String mkwPackageName = "com.limo.cloudreve4_flutter";
+const String mkwPackageName = "com.pan.yupeng.tv";
 const String mkwOriginalIconPath = "";
 const String mkwCopiedIconPath = "";
 const String mkwAndroidIconPath = "";
@@ -10,6 +10,6 @@ const String mkwWindowsIconPath = "";
 const String mkwCopiedAndroidIconPath = "";
 const String mkwCopiedWindowsIconPath = "";
 const String mkwMobileSplashImagePath = "";
-const String mkwAppVersionName = "1.4.0";
-const int mkwAppBuildNumber = 1;
+const String mkwAppVersionName = "1.5.8";
+const int mkwAppBuildNumber = 2;
 const bool mkwBrandConfigReady = true;
