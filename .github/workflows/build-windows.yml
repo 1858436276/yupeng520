@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: cloudreve4_flutter
+        working-directory: cloudreve4_flutter   # 确认您的目录名，如果是 cloudreve4_flutter 则保留
 
     steps:
       - uses: actions/checkout@v4
@@ -20,17 +20,46 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true   # 不指定具体版本，自动使用最新稳定版
+          cache: true
 
-      # ⬇️⬇️⬇️ 新增：启用 Windows 桌面支持 ⬇️⬇️⬇️
       - name: Enable Windows desktop support
         run: flutter create --platforms=windows .
+
+      # ---------- 如果需要 Rust 库 ----------
+      - name: Check if native folder exists
+        id: check_native
+        run: |
+          if (Test-Path "native") {
+            echo "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            echo "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+        shell: pwsh
+
+      - name: Setup Rust (if native exists)
+        if: steps.check_native.outputs.exists == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build Rust DLL (if native exists)
+        if: steps.check_native.outputs.exists == 'true'
+        run: |
+          cd native
+          cargo build --release --target x86_64-pc-windows-msvc
+          mkdir -p ../windows/runner/Release
+          cp target/x86_64-pc-windows-msvc/release/*.dll ../windows/runner/Release/
+      # ---------------------------------------
 
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      - name: Build Windows release
-        run: flutter build windows --release
+      - name: Clean previous build (avoids cache issues)
+        run: flutter clean
+
+      - name: Build Windows release with verbose output
+        run: flutter build windows --release --verbose
+        continue-on-error: false   # 失败时立即停止
 
       - name: Package into ZIP
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath cloudreve4-windows.zip
