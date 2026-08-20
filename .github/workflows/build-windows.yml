@@ -20,8 +20,11 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          cache: true
-        # 不指定具体版本，自动使用最新 stable
+          cache: true   # 不指定具体版本，自动使用最新稳定版
+
+      # ⬇️⬇️⬇️ 新增：启用 Windows 桌面支持 ⬇️⬇️⬇️
+      - name: Enable Windows desktop support
+        run: flutter create --platforms=windows .
 
       - name: Install Flutter dependencies
         run: flutter pub get
