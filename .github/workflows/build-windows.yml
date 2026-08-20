@@ -65,11 +65,30 @@ jobs:
       - name: Package into ZIP
         run: Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath cloudreve4-windows.zip
 
+      - name: Build Inno Setup installer
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-ChildItem "C:\Program Files (x86)" -Directory -Filter "Inno Setup*" | ForEach-Object { Get-ChildItem $_.FullName -Filter "ISCC.exe" -Recurse } | Select-Object -First 1).FullName
+          }
+          $m = Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)'
+          $version = $m.Matches[0].Groups[1].Value
+          Write-Host "Building installer v$version with $iscc"
+          & $iscc "installer\cloudreve4_installer.iss" /DMyAppVersion=$version
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: cloudreve4-windows
           path: cloudreve4_flutter/cloudreve4-windows.zip
+          if-no-files-found: error
+
+      - name: Upload setup installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudreve4-windows-setup
+          path: cloudreve4_flutter/installer/output/cloudreve4-windows-setup.exe
           if-no-files-found: error
 
       - name: Upload to Release
