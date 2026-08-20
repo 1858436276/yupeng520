@@ -33,6 +33,7 @@ DESIGN-copy.md
 todo.md
 feat-2315.md
 *.txt
+!**/CMakeLists.txt
 *.json
 *.jsonl
 example.dart
