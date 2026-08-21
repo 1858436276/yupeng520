@@ -4,7 +4,7 @@
 #endif
 #define MyAppPublisher "yupeng520"
 #define MyAppExeName "cloudreve4_flutter.exe"
-#define MyAppId "{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D}"
+#define MyAppId "{{1B2A3C4D-5E6F-4A7B-8C9D-0E1F2A3B4C5D}"
 
 [Setup]
 AppId={#MyAppId}
