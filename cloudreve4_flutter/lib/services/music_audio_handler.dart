@@ -28,7 +28,7 @@ class MusicPlayerAudioHandler extends BaseAudioHandler with SeekHandler {
     mediaItem.add(MediaItem(
       id: current.id,
       title: current.name,
-      artist: 'Cloudreve',
+      artist: '小白云盘',
     ));
     _updateArtwork(current);
     final playing = _controller.playing;
