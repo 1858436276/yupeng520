@@ -31,7 +31,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.limo.cloudreve4_flutter"
+    namespace = "com.pan.yupeng521.top"
     compileSdk = getLocalProperty("flutter.compileSdkVersion", 34)
     ndkVersion = flutter.ndkVersion
 
