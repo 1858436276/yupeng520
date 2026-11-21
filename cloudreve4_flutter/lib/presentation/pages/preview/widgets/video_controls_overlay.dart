@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import '../../../../core/utils/file_type_utils.dart';
 import '../../../../core/utils/video_fullscreen.dart';
 import '../../../../data/models/file_model.dart';
+import '../../../../services/dlna_cast_service.dart';
 import '../../../widgets/toast_helper.dart';
 
 /// 自定义视频控制栏叠加层（Bilibili 风格）
@@ -56,7 +57,8 @@ class VideoControlsOverlay extends StatefulWidget {
   State<VideoControlsOverlay> createState() => _VideoControlsOverlayState();
 }
 
-class _VideoControlsOverlayState extends State<VideoControlsOverlay> with WindowListener {
+class _VideoControlsOverlayState extends State<VideoControlsOverlay>
+    with WindowListener {
   Player get player => widget.state.widget.controller.player;
 
   bool _controlsVisible = true;
@@ -115,7 +117,15 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   // 桌面端鼠标悬停
   Timer? _mouseHoverTimer;
 
-  bool get _isDesktop => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+  // ========== 投屏 ==========
+  CastDevice? _castDevice;
+  bool _casting = false;
+
+  /// 投屏中电视是否处于播放态（用于同步 UI）
+  bool _castPlaying = true;
+
+  bool get _isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
   @override
   void initState() {
@@ -151,16 +161,19 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     if (_isFullscreen) {
       _doExitFullscreen();
     } else if (!_isDesktop) {
-      // 未处于全屏也恢复沉浸模式（进全屏时序保护）
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual,
           overlays: SystemUiOverlay.values);
     }
     if (!_isDesktop) {
-      // 恢复全局竖屏锁定
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,
       ]);
+    }
+    // 若正在投屏，异步通知电视停止（不等待、不依赖 context）
+    final device = _castDevice;
+    if (device != null) {
+      DlnaCastService.instance.stop(device).catchError((_) {});
     }
     super.dispose();
   }
@@ -174,10 +187,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       final w = params.w;
       final h = params.h;
       if (w == null || h == null || w <= 0 || h <= 0) return;
-      // 宽 > 高视为横屏视频，否则竖屏视频
-      final next = w > h
-          ? _VideoOrientation.landscape
-          : _VideoOrientation.portrait;
+      final next =
+          w > h ? _VideoOrientation.landscape : _VideoOrientation.portrait;
       if (_orientation != next) {
         _orientation = next;
         _applyOrientation();
@@ -201,14 +212,11 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
         ]);
         break;
       case _VideoOrientation.auto:
-        await SystemChrome.setPreferredOrientations(
-          DeviceOrientation.values,
-        );
+        await SystemChrome.setPreferredOrientations(DeviceOrientation.values);
         break;
     }
   }
 
-  // 手动横/竖屏切换
   void _toggleOrientation() {
     if (_isDesktop) return;
     _userOrientationOverride = true;
@@ -253,7 +261,6 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       videoFullscreenNotifier.value = true;
       await windowManager.setFullScreen(true);
     } else {
-      // 只切换沉浸模式，方向保持自动旋转（竖屏视频竖屏全屏，横屏视频横屏全屏）
       await SystemChrome.setEnabledSystemUIMode(
         SystemUiMode.immersiveSticky,
         overlays: [],
@@ -275,6 +282,10 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   }
 
   void _onBack() {
+    // 若正在投屏，先停止（避免电视继续播放）
+    if (_casting) {
+      _stopCast();
+    }
     if (_isFullscreen) {
       _doExitFullscreen().then((_) {
         if (mounted) setState(() {});
@@ -339,7 +350,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     _showControls();
   }
 
-  // ========== 垂直滑动调亮度/音量（左1/3亮度、右1/3音量） ==========
+  // ========== 垂直滑动调亮度/音量 ==========
 
   void _onVerticalDragStart(DragStartDetails details) {
     final width = MediaQuery.of(context).size.width;
@@ -355,7 +366,6 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     _verticalIndicatorTimer?.cancel();
     _verticalZone = zone;
     _verticalAdjusting = true;
-    // 记录手势起点的 y 与高度，后续用累计位移计算，支持长距离连续调节
     _verticalDragStartDy = details.localPosition.dy;
     _verticalDragStartHeight = MediaQuery.of(context).size.height;
     if (zone == _VerticalZone.brightness) {
@@ -371,7 +381,6 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     if (!_verticalAdjusting) return;
     final height = _verticalDragStartHeight;
     if (height <= 0) return;
-    // 上滑增大，下滑减小；用相对手势起点的累计位移，避免每帧只取单帧增量导致"只能点划"
     final delta = (_verticalDragStartDy - details.localPosition.dy) / height;
     if (_verticalZone == _VerticalZone.brightness) {
       _brightness = (_brightnessStart + delta).clamp(0.0, 1.0);
@@ -394,7 +403,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     if (_isDesktop) _startMouseHoverTimer();
   }
 
-  // ========== 拖动进度（大厂风格） ==========
+  // ========== 拖动进度 ==========
 
   void _onDragSeekStart(DragStartDetails details) {
     final dur = player.state.duration;
@@ -428,7 +437,13 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
 
   void _onDragSeekEnd(DragEndDetails details) {
     if (!_dragSeeking) return;
+    // 本地同步 seek（更新 UI 显示）；投屏中额外向电视 seek
     player.seek(_seekPosition);
+    if (_casting && _castDevice != null) {
+      DlnaCastService.instance
+          .seek(_castDevice!, _seekPosition)
+          .catchError((_) {});
+    }
     setState(() {
       _dragSeeking = false;
       _isSeeking = false;
@@ -440,6 +455,11 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   // ========== 播放/暂停闪光 ==========
 
   void _togglePlayPause() {
+    // 投屏中：只控制电视，本地保持暂停
+    if (_casting) {
+      _toggleCastPlayPause();
+      return;
+    }
     final willPlay = !player.state.playing;
     player.playOrPause();
     setState(() {
@@ -455,6 +475,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   }
 
   void _onLongPressStart() {
+    if (_casting) return;
     _hideTimer?.cancel();
     _rateBeforeLongPress = player.state.rate;
     player.setRate(2.0);
@@ -466,6 +487,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   }
 
   void _onLongPressEnd() {
+    if (_casting) return;
     player.setRate(_rateBeforeLongPress);
     setState(() {
       _isLongPressing = false;
@@ -502,26 +524,34 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     if (_locked) return;
     final key = event.logicalKey;
     if (key == LogicalKeyboardKey.space) {
-      player.playOrPause();
+      _togglePlayPause();
     } else if (key == LogicalKeyboardKey.keyM) {
       _toggleMute();
-    } else if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+    } else if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
       _toggleFullscreen();
     } else if (key == LogicalKeyboardKey.escape) {
       if (_isFullscreen) _onBack();
     } else if (key == LogicalKeyboardKey.arrowLeft) {
       final pos = player.state.position - const Duration(seconds: 5);
-      player.seek(pos < Duration.zero ? Duration.zero : pos);
+      _seekBoth(pos < Duration.zero ? Duration.zero : pos);
     } else if (key == LogicalKeyboardKey.arrowRight) {
       final pos = player.state.position + const Duration(seconds: 5);
       final dur = player.state.duration;
-      player.seek(pos > dur ? dur : pos);
+      _seekBoth(pos > dur ? dur : pos);
     } else if (key == LogicalKeyboardKey.arrowUp) {
       final vol = (player.state.volume + 5).clamp(0.0, 100.0);
       player.setVolume(vol);
     } else if (key == LogicalKeyboardKey.arrowDown) {
       final vol = (player.state.volume - 5).clamp(0.0, 100.0);
       player.setVolume(vol);
+    }
+  }
+
+  void _seekBoth(Duration position) {
+    player.seek(position);
+    if (_casting && _castDevice != null) {
+      DlnaCastService.instance.seek(_castDevice!, position).catchError((_) {});
     }
   }
 
@@ -538,7 +568,6 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
 
   void _onVolumeIconTap(double currentVolume) {
     if (_volumeSliderVisible) {
-      // 滑条已展开，再次点击小喇叭 → 静音
       if (currentVolume <= 0) {
         player.setVolume(_volumeBeforeMute);
       } else {
@@ -546,7 +575,6 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
         player.setVolume(0);
       }
     } else {
-      // 滑条未展开，展开滑条
       _hideTimer?.cancel();
       setState(() => _volumeSliderVisible = true);
     }
@@ -571,10 +599,12 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
           children: [
             Padding(
               padding: const EdgeInsets.all(12),
-              child: Text('倍速播放',
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: Colors.white70,
-                  )),
+              child: Text(
+                '倍速播放',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: Colors.white70,
+                    ),
+              ),
             ),
             const Divider(height: 1, color: Colors.white24),
             Wrap(
@@ -587,8 +617,10 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                       '${rate}x',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: selected ? const Color(0xFFE94560) : Colors.white,
-                        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                        color:
+                            selected ? const Color(0xFFE94560) : Colors.white,
+                        fontWeight:
+                            selected ? FontWeight.bold : FontWeight.normal,
                         fontSize: 14,
                       ),
                     ),
@@ -608,7 +640,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     );
   }
 
-  // ========== 播放列表（当前目录视频切换） ==========
+  // ========== 播放列表 ==========
 
   Future<void> _showPlaylist() async {
     final playlist = widget.playlist;
@@ -649,7 +681,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                       FileTypeUtils.isVideo(file.name)
                           ? Icons.movie_outlined
                           : Icons.folder_outlined,
-                      color: selected ? const Color(0xFFE94560) : Colors.white54,
+                      color:
+                          selected ? const Color(0xFFE94560) : Colors.white54,
                     ),
                     title: Text(
                       file.name,
@@ -657,7 +690,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: selected ? const Color(0xFFE94560) : Colors.white,
-                        fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                        fontWeight:
+                            selected ? FontWeight.bold : FontWeight.normal,
                         fontSize: 14,
                       ),
                     ),
@@ -680,6 +714,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
 
   Future<void> _switchVideo(FileModel file, int index) async {
     _hideTimer?.cancel();
+    // 切换视频前先停投屏，避免电视继续播旧片
+    if (_casting) await _stopCast();
     setState(() {
       _playlistIndex = index;
       _title = file.name;
@@ -696,7 +732,95 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
     _startHideTimer();
   }
 
-  // ========== 设置菜单（解码方式 / 画面比例 / 小屏） ==========
+  // ========== 投屏（DLNA） ==========
+
+  Future<void> _showCastDialog() async {
+    _hideTimer?.cancel();
+    _mouseHoverTimer?.cancel();
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) => _CastDeviceDialog(
+        currentDevice: _castDevice,
+        onCast: (device) async {
+          Navigator.of(ctx).pop();
+          await _startCast(device);
+        },
+        onStopCast: _castDevice != null ? _stopCast : null,
+      ),
+    );
+    _startHideTimer();
+  }
+
+  Future<void> _startCast(CastDevice device) async {
+    final uri = player.state.media.uri;
+    if (uri.isEmpty) {
+      ToastHelper.error('无法获取当前视频地址');
+      return;
+    }
+    try {
+      // 暂停本机播放，手机作为遥控器
+      await player.pause();
+      await DlnaCastService.instance.castUrl(device, uri.toString(),
+          title: _title);
+      if (!mounted) return;
+      setState(() {
+        _castDevice = device;
+        _casting = true;
+        _castPlaying = true;
+        _controlsVisible = true;
+      });
+      ToastHelper.success('已投屏到 ${device.friendlyName}');
+    } catch (e) {
+      if (mounted) ToastHelper.error('投屏失败：$e');
+    }
+  }
+
+  Future<void> _stopCast() async {
+    final device = _castDevice;
+    if (device == null) return;
+    try {
+      await DlnaCastService.instance.stop(device);
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _castDevice = null;
+      _casting = false;
+      _castPlaying = true;
+    });
+    ToastHelper.success('已停止投屏');
+  }
+
+  /// 投屏中的播放/暂停切换
+  Future<void> _toggleCastPlayPause() async {
+    final device = _castDevice;
+    if (device == null) return;
+    final willPlay = !_castPlaying;
+    try {
+      if (willPlay) {
+        await DlnaCastService.instance.play(device);
+      } else {
+        await DlnaCastService.instance.pause(device);
+      }
+      if (mounted) {
+        setState(() {
+          _castPlaying = willPlay;
+          _lastFlashIsPlaying = willPlay;
+          _playPauseFlashSerial++;
+        });
+        _playPauseFlashTimer?.cancel();
+        _playPauseFlashTimer = Timer(const Duration(milliseconds: 700), () {
+          if (mounted && _playPauseFlashSerial != 0) {
+            setState(() => _playPauseFlashSerial = 0);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) ToastHelper.error('投屏控制失败：$e');
+    }
+  }
+
+  // ========== 设置菜单 ==========
 
   void _showSettingsMenu() {
     _hideTimer?.cancel();
@@ -722,7 +846,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             const Divider(height: 1, color: Colors.white24),
             // 解码方式
             ListTile(
-              leading: const Icon(Icons.memory, color: Colors.white70, size: 20),
+              leading:
+                  const Icon(Icons.memory, color: Colors.white70, size: 20),
               title: const Text(
                 '解码方式',
                 style: TextStyle(color: Colors.white, fontSize: 14),
@@ -738,7 +863,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             ),
             // 画面比例
             ListTile(
-              leading: const Icon(Icons.aspect_ratio, color: Colors.white70, size: 20),
+              leading: const Icon(Icons.aspect_ratio,
+                  color: Colors.white70, size: 20),
               title: const Text(
                 '画面比例',
                 style: TextStyle(color: Colors.white, fontSize: 14),
@@ -752,17 +878,41 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                 _showAspectMenu();
               },
             ),
+            // 投屏
+            ListTile(
+              leading: const Icon(Icons.cast, color: Colors.white70, size: 20),
+              title: const Text(
+                '投屏',
+                style: TextStyle(color: Colors.white, fontSize: 14),
+              ),
+              trailing: _casting
+                  ? const Text(
+                      '投屏中',
+                      style:
+                          TextStyle(color: Color(0xFFE94560), fontSize: 13),
+                    )
+                  : const Icon(Icons.chevron_right,
+                      color: Colors.white38, size: 20),
+              onTap: () {
+                Navigator.of(ctx).pop();
+                _showCastDialog();
+              },
+            ),
             // 小屏播放
             if (widget.onMiniPlayer != null)
               ListTile(
-                leading: const Icon(Icons.picture_in_picture_alt, color: Colors.white70, size: 20),
+                leading: const Icon(Icons.picture_in_picture_alt,
+                    color: Colors.white70, size: 20),
                 title: const Text(
                   '小屏播放',
                   style: TextStyle(color: Colors.white, fontSize: 14),
                 ),
-                trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
-                onTap: () {
+                trailing: const Icon(Icons.chevron_right,
+                    color: Colors.white38, size: 20),
+                onTap: () async {
                   Navigator.of(ctx).pop();
+                  // 投屏与小屏互斥
+                  if (_casting) await _stopCast();
                   widget.onMiniPlayer!();
                 },
               ),
@@ -795,8 +945,10 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                   opt.$2,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: selected ? const Color(0xFFE94560) : Colors.white,
-                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    color:
+                        selected ? const Color(0xFFE94560) : Colors.white,
+                    fontWeight:
+                        selected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
                 onTap: () {
@@ -837,8 +989,10 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                   opt.$2,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: selected ? const Color(0xFFE94560) : Colors.white,
-                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    color:
+                        selected ? const Color(0xFFE94560) : Colors.white,
+                    fontWeight:
+                        selected ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
                 onTap: () {
@@ -918,7 +1072,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
           if (_isLongPressing)
             Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(8),
@@ -926,7 +1081,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.fast_forward, color: Colors.white, size: 20),
+                    const Icon(Icons.fast_forward,
+                        color: Colors.white, size: 20),
                     const SizedBox(width: 8),
                     Text(
                       '2.0x 快进中',
@@ -934,7 +1090,11 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                         color: Colors.white,
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
-                        shadows: [Shadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 4)],
+                        shadows: [
+                          Shadow(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              blurRadius: 4),
+                        ],
                       ),
                     ),
                   ],
@@ -942,95 +1102,97 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               ),
             ),
 
-          // Buffering 指示器
-          StreamBuilder<bool>(
-            stream: player.stream.buffering,
-            initialData: player.state.buffering,
-            builder: (context, snapshot) {
-              final buffering = snapshot.data ?? player.state.buffering;
-              if (!buffering) return const SizedBox.shrink();
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(color: Colors.white70),
-                    const SizedBox(height: 10),
-                    Text(
-                      '网络不佳，正在缓冲…',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.9),
-                        fontSize: 14,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            blurRadius: 4,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-
-          // 播放结束：重播提示（大厂风格）
-          StreamBuilder<bool>(
-            stream: player.stream.completed,
-            builder: (context, snapshot) {
-              final completed = snapshot.data ?? false;
-              if (!completed) return const SizedBox.shrink();
-              return StreamBuilder<Duration>(
-                stream: player.stream.position,
-                initialData: player.state.position,
-                builder: (context, posSnapshot) {
-                  final pos = posSnapshot.data ?? Duration.zero;
-                  final dur = player.state.duration;
-                  if (dur.inMilliseconds <= 0 || pos < dur) {
-                    return const SizedBox.shrink();
-                  }
-                  return Center(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        player.seek(Duration.zero);
-                        player.play();
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 28,
-                          vertical: 14,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black45,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.replay_circle_filled_outlined,
-                              color: Colors.white,
-                              size: 58,
-                            ),
-                            const SizedBox(height: 6),
-                            const Text(
-                              '重播',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
+          // Buffering 指示器（投屏中不展示，避免误以为本机在加载）
+          if (!_casting)
+            StreamBuilder<bool>(
+              stream: player.stream.buffering,
+              initialData: player.state.buffering,
+              builder: (context, snapshot) {
+                final buffering = snapshot.data ?? player.state.buffering;
+                if (!buffering) return const SizedBox.shrink();
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const CircularProgressIndicator(color: Colors.white70),
+                      const SizedBox(height: 10),
+                      Text(
+                        '网络不佳，正在缓冲…',
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.9),
+                          fontSize: 14,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withValues(alpha: 0.6),
+                              blurRadius: 4,
                             ),
                           ],
                         ),
                       ),
-                    ),
-                  );
-                },
-              );
-            },
-          ),
+                    ],
+                  ),
+                );
+              },
+            ),
+
+          // 播放结束：重播提示（投屏中不展示）
+          if (!_casting)
+            StreamBuilder<bool>(
+              stream: player.stream.completed,
+              builder: (context, snapshot) {
+                final completed = snapshot.data ?? false;
+                if (!completed) return const SizedBox.shrink();
+                return StreamBuilder<Duration>(
+                  stream: player.stream.position,
+                  initialData: player.state.position,
+                  builder: (context, posSnapshot) {
+                    final pos = posSnapshot.data ?? Duration.zero;
+                    final dur = player.state.duration;
+                    if (dur.inMilliseconds <= 0 || pos < dur) {
+                      return const SizedBox.shrink();
+                    }
+                    return Center(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          player.seek(Duration.zero);
+                          player.play();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 28,
+                            vertical: 14,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black45,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.replay_circle_filled_outlined,
+                                color: Colors.white,
+                                size: 58,
+                              ),
+                              const SizedBox(height: 6),
+                              const Text(
+                                '重播',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
 
           // 控制栏
           AnimatedOpacity(
@@ -1059,7 +1221,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               ),
             ),
 
-          // 锁屏按钮（常驻视频左中间，横竖屏统一位置）
+          // 锁屏按钮（常驻视频左中间）
           Align(
             alignment: Alignment.centerLeft,
             child: Padding(
@@ -1085,11 +1247,12 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             ),
           ),
 
-          // 锁屏提示（单击解锁）
+          // 锁屏提示
           if (_locked)
             Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(10),
@@ -1124,7 +1287,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               ),
             ),
 
-          // 亮度蒙层（最上层，不吃手势）
+          // 亮度蒙层
           if (_brightness < 0.999)
             Positioned.fill(
               child: IgnorePointer(
@@ -1139,7 +1302,6 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       ),
     );
 
-    // 桌面端：鼠标悬停 + 键盘
     if (_isDesktop) {
       overlay = MouseRegion(
         onHover: _onMouseHover,
@@ -1194,9 +1356,42 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
               ),
             ),
           ),
+          // 投屏徽标
+          if (_casting)
+            Container(
+              margin: const EdgeInsets.only(right: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE94560).withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.cast_connected,
+                      color: Colors.white, size: 12),
+                  const SizedBox(width: 4),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 120),
+                    child: Text(
+                      _castDevice?.friendlyName ?? '投屏中',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (widget.playlist != null && widget.playlist!.length > 1)
             IconButton(
-              icon: const Icon(Icons.playlist_play, color: Colors.white, size: 20),
+              icon: const Icon(Icons.playlist_play,
+                  color: Colors.white, size: 20),
               tooltip: '播放列表',
               onPressed: _showPlaylist,
             ),
@@ -1218,6 +1413,30 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 投屏状态提示
+          if (_casting)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.tv,
+                      color: Colors.white.withValues(alpha: 0.85), size: 14),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      '正在电视上播放 · ${_castDevice?.friendlyName ?? ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           _buildSeekBar(),
           Padding(
             padding: EdgeInsets.only(
@@ -1233,19 +1452,21 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   Widget _buildControlsRow() {
     return Row(
       children: [
-        // 播放/暂停
+        // 播放/暂停（投屏中反映电视状态）
         StreamBuilder<bool>(
           stream: player.stream.playing,
           initialData: player.state.playing,
           builder: (context, snapshot) {
-            final playing = snapshot.data ?? player.state.playing;
+            final playing =
+                _casting ? _castPlaying : (snapshot.data ?? player.state.playing);
             return IconButton(
-              icon: Icon(playing ? Icons.pause : Icons.play_arrow, color: Colors.white),
+              icon: Icon(playing ? Icons.pause : Icons.play_arrow,
+                  color: Colors.white),
               onPressed: _togglePlayPause,
             );
           },
         ),
-        // 音量控制
+        // 音量控制（投屏时对电视无效，但保留 UI 一致）
         _buildVolumeControl(),
         // 时间
         StreamBuilder<Duration>(
@@ -1262,7 +1483,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                   padding: const EdgeInsets.only(left: 8),
                   child: Text(
                     '${_formatDuration(pos)} / ${_formatDuration(dur)}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    style: const TextStyle(
+                        color: Colors.white70, fontSize: 12),
                   ),
                 );
               },
@@ -1270,15 +1492,16 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
           },
         ),
         const Spacer(),
-        // 倍速按钮
+        // 倍速
         StreamBuilder<double>(
           stream: player.stream.rate,
           builder: (context, snapshot) {
             final rate = snapshot.data ?? 1.0;
             return GestureDetector(
-              onTap: _showSpeedMenu,
+              onTap: _casting ? null : _showSpeedMenu,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 child: Text(
                   '${rate}x',
                   style: const TextStyle(
@@ -1304,13 +1527,23 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
             tooltip: '横/竖屏切换',
             onPressed: _toggleOrientation,
           ),
-        // 设置按钮（解码/画面比例/小屏播放）
+        // 投屏
+        IconButton(
+          icon: Icon(
+            _casting ? Icons.cast_connected : Icons.cast,
+            color: _casting ? const Color(0xFFE94560) : Colors.white,
+            size: 20,
+          ),
+          tooltip: _casting ? '投屏中' : '投屏',
+          onPressed: _showCastDialog,
+        ),
+        // 设置
         IconButton(
           icon: const Icon(Icons.settings, color: Colors.white, size: 20),
           tooltip: '设置',
           onPressed: _showSettingsMenu,
         ),
-        // 全屏按钮
+        // 全屏
         IconButton(
           icon: Icon(
             _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
@@ -1358,8 +1591,10 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                       child: SliderTheme(
                         data: SliderThemeData(
                           trackHeight: 2,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 10),
+                          thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 5),
+                          overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 10),
                           activeTrackColor: const Color(0xFFE94560),
                           inactiveTrackColor: Colors.white24,
                           thumbColor: const Color(0xFFE94560),
@@ -1426,13 +1661,11 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                   height: 20,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      // Slider 默认轨道左右各留 24px 的缩进
                       const inset = 24.0;
                       final trackWidth = constraints.maxWidth - inset * 2;
                       return Stack(
                         alignment: Alignment.center,
                         children: [
-                          // 缓冲进度（大厂风格：进度条底层白色半透明）
                           Positioned(
                             left: inset,
                             width: trackWidth * bufferValue,
@@ -1476,7 +1709,13 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                                   milliseconds:
                                       (duration.inMilliseconds * v).round(),
                                 );
+                                // 本地同步 + 投屏同步
                                 player.seek(seekTo);
+                                if (_casting && _castDevice != null) {
+                                  DlnaCastService.instance
+                                      .seek(_castDevice!, seekTo)
+                                      .catchError((_) {});
+                                }
                                 setState(() => _isSeeking = false);
                                 _startHideTimer();
                                 if (_isDesktop) _startMouseHoverTimer();
@@ -1541,7 +1780,8 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
                     ),
                     Text(
                       s.$2,
-                      style: const TextStyle(color: Colors.white70, fontSize: 10),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 10),
                     ),
                   ],
                 ),
@@ -1554,7 +1794,7 @@ class _VideoControlsOverlayState extends State<VideoControlsOverlay> with Window
   }
 }
 
-/// 垂直滑动调节（亮度/音量）指示气泡：图标 + 百分比 + 竖向进度条。
+/// 垂直滑动调节（亮度/音量）指示气泡
 class _AdjustIndicator extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1589,7 +1829,6 @@ class _AdjustIndicator extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 8),
-          // 竖向进度条（底部填充）
           SizedBox(
             height: 64,
             child: Stack(
@@ -1621,13 +1860,13 @@ class _AdjustIndicator extends StatelessWidget {
   }
 }
 
-/// 垂直滑动分区：左侧亮度、右侧音量、中间不响应。
+/// 垂直滑动分区：左侧亮度、右侧音量、中间不响应
 enum _VerticalZone { none, brightness, volume }
 
-/// 移动端方向锁定状态。
+/// 移动端方向锁定状态
 enum _VideoOrientation { auto, portrait, landscape }
 
-/// 拖拽进度时的当前时间气泡。
+/// 拖拽进度时的当前时间气泡
 class _DragSeekBubble extends StatelessWidget {
   final String text;
   const _DragSeekBubble({required this.text});
@@ -1659,7 +1898,7 @@ class _DragSeekBubble extends StatelessWidget {
   }
 }
 
-/// 播放/暂停中央闪光提示（大厂风格）。
+/// 播放/暂停中央闪光提示
 class _PlayPauseFlash extends StatefulWidget {
   final bool isPlaying;
   const _PlayPauseFlash({super.key, required this.isPlaying});
@@ -1700,7 +1939,7 @@ class _PlayPauseFlashState extends State<_PlayPauseFlash>
         child: Container(
           width: 78,
           height: 78,
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: Colors.black45,
             shape: BoxShape.circle,
           ),
@@ -1709,6 +1948,159 @@ class _PlayPauseFlashState extends State<_PlayPauseFlash>
             color: Colors.white,
             size: 46,
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 投屏设备选择对话框
+class _CastDeviceDialog extends StatefulWidget {
+  final CastDevice? currentDevice;
+  final void Function(CastDevice device) onCast;
+  final Future<void> Function()? onStopCast;
+
+  const _CastDeviceDialog({
+    required this.onCast,
+    this.currentDevice,
+    this.onStopCast,
+  });
+
+  @override
+  State<_CastDeviceDialog> createState() => _CastDeviceDialogState();
+}
+
+class _CastDeviceDialogState extends State<_CastDeviceDialog> {
+  List<CastDevice> _devices = [];
+  bool _searching = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _search();
+  }
+
+  Future<void> _search() async {
+    setState(() {
+      _searching = true;
+      _error = null;
+      _devices = [];
+    });
+    try {
+      final devices = await DlnaCastService.instance.discover();
+      if (mounted) {
+        setState(() {
+          _devices = devices;
+          _searching = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _searching = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.black87,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.cast, color: Colors.white),
+                const SizedBox(width: 8),
+                const Text('投屏',
+                    style: TextStyle(color: Colors.white, fontSize: 16)),
+                const Spacer(),
+                if (widget.currentDevice != null && widget.onStopCast != null)
+                  TextButton(
+                    onPressed: () async {
+                      await widget.onStopCast?.call();
+                      if (context.mounted) Navigator.of(context).pop();
+                    },
+                    child: const Text('停止投屏',
+                        style: TextStyle(color: Color(0xFFE94560))),
+                  ),
+              ],
+            ),
+            const Divider(color: Colors.white24),
+            if (_searching)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 12),
+                  Text('正在搜索投屏设备...',
+                      style: TextStyle(color: Colors.white70)),
+                ]),
+              )
+            else if (_error != null)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(children: [
+                  Text('搜索失败：$_error',
+                      style: const TextStyle(color: Colors.white70),
+                      textAlign: TextAlign.center),
+                  const SizedBox(height: 8),
+                  TextButton(onPressed: _search, child: const Text('重试')),
+                ]),
+              )
+            else if (_devices.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(children: [
+                  const Text('未找到投屏设备',
+                      style: TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 8),
+                  TextButton(onPressed: _search, child: const Text('重新搜索')),
+                ]),
+              )
+            else
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 320),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _devices.length,
+                  itemBuilder: (context, i) {
+                    final device = _devices[i];
+                    final isCurrent =
+                        widget.currentDevice?.location == device.location;
+                    return ListTile(
+                      leading: Icon(
+                        Icons.tv,
+                        color: isCurrent
+                            ? const Color(0xFFE94560)
+                            : Colors.white70,
+                      ),
+                      title: Text(
+                        device.friendlyName,
+                        style: TextStyle(
+                          color: isCurrent
+                              ? const Color(0xFFE94560)
+                              : Colors.white,
+                        ),
+                      ),
+                      trailing: isCurrent
+                          ? const Icon(Icons.check,
+                              color: Color(0xFFE94560))
+                          : null,
+                      onTap: () => widget.onCast(device),
+                    );
+                  },
+                ),
+              ),
+            const SizedBox(height: 8),
+          ],
         ),
       ),
     );
